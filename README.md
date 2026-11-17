@@ -1,4 +1,58 @@
-﻿# TranslucentTB
+﻿# TranslucentBarImproved (fork of TranslucentTB)
+
+> This is a personal fork of [TranslucentTB](https://github.com/TranslucentTB/TranslucentTB).
+> Everything below the line is the original README. Please report issues with the fork here, not upstream.
+
+With a transparent taskbar, a maximized app ends above a strip of wallpaper, which rarely matches the app.
+This fork adds **`match_window_color`**: while a window is maximized, the taskbar takes the color of the app's
+bottom edge, with a thin divider line in a slightly lighter or darker shade.
+
+| Before (clear taskbar, maximized blue app) | After (`match_window_color`) |
+|---|---|
+| ![Before](docs/improved/before_blue.png) | ![After](docs/improved/fork_match_blue.png) |
+
+### How it behaves
+- Samples the 3 pixel rows next to the taskbar 10 times a second and picks the dominant color.
+- If the app's edge is busy (a photo, mixed UI: under 60% one color), it falls back to the state's normal `accent`/`color`.
+- Keeps taskbar icons and clock readable: the color is darkened (dark system theme) or lightened (light theme)
+  until the text reaches 3:1 contrast. A white app gives a `#949494` taskbar.
+- `show_line: true` draws the divider in a shade of the matched color.
+- Changes fade over 150 ms (ease-out), including fading in when a window is maximized and out when it isn't.
+
+### Settings
+Add it to `maximized_window_appearance` in `settings.json` (tray icon → Advanced → Edit settings):
+
+```json
+"maximized_window_appearance": {
+  "enabled": true,
+  "accent": "clear",
+  "color": "#00000000",
+  "show_line": true,
+  "match_window_color": true
+}
+```
+
+### Building
+GitHub Actions builds an unsigned x64 portable app on every push (`.github/workflows/build.yml`, artifact
+`TranslucentTB-portable-x64`). Unzip it anywhere and run `TranslucentTB.exe`; `settings.json` lives next to it.
+Windows 11 only in portable mode, and the Microsoft.UI.Xaml 2.8 and VCLibs frameworks must be installed
+(installing official TranslucentTB once pulls them in).
+
+Notes:
+- Quit the official TranslucentTB first; only one can run at a time.
+- Updating requires restarting Explorer once, because Explorer keeps the injected `ExplorerTAP.dll` loaded.
+- The fork's injected component uses its own GUIDs, so it never mixes with the official one.
+
+### Changes vs upstream
+- `Common/util/colormatch.hpp`: color picking, readability and fade math (tests in `Tests/util/colormatch.cpp`).
+- `TaskbarAttributeWorker`: sampling timer, matched color state, fade timer.
+- `ExplorerTAP`: new `SetTaskbarBorderColor` call; new GUIDs, ready event and payload (TAP API v5).
+- `TranslucentTB.vcxproj`: `CppWinRTGenerateWindowsMetadata=true` to fix MSB4006 (circular target) on VS 2026.
+- `tools/livecheck/`: Python scripts used to verify builds on a real screen (`verify_live.py`, `fade_check.py`).
+
+---
+
+# TranslucentTB
 
 [![Liberapay patrons](https://img.shields.io/liberapay/patrons/TranslucentTB.svg)](https://liberapay.com/TranslucentTB/)
 [![Join on Discord](https://discordapp.com/api/guilds/304387206552879116/widget.png?style=shield)][Discord]
