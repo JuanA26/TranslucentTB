@@ -15,6 +15,11 @@
     <ConfigurationType>Application</ConfigurationType>
     <GenerateManifest>true</GenerateManifest>
     <RootNamespace>TranslucentTB</RootNamespace>
+    <!--
+      Set explicitly (it would compute to true because of ShellExperience.idl) so CppWinRT skips
+      CppWinRTComputeGetResolvedWinMD, which hits MSB4006 (circular target dependency) on MSBuild 18 / VS 2026.
+    -->
+    <CppWinRTGenerateWindowsMetadata>true</CppWinRTGenerateWindowsMetadata>
   </PropertyGroup>
   <Import Project="..\Common\CppProject.props" />
   <PropertyGroup>
