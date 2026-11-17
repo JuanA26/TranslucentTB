@@ -139,6 +139,21 @@ namespace Util::ColorMatch {
 		return Mix(c, toward, hi);
 	}
 
+	// Ease-out cubic: fast start, gentle landing. t in [0, 1].
+	constexpr double EaseOut(double t) noexcept
+	{
+		t = std::clamp(t, 0.0, 1.0);
+		const double inv = 1.0 - t;
+		return 1.0 - inv * inv * inv;
+	}
+
+	// Blend all four channels (including alpha), for fading in/out and between colors.
+	inline Color Blend(const Color &a, const Color &b, double t) noexcept
+	{
+		const auto lerp = [t](std::uint8_t x, std::uint8_t y) { return static_cast<std::uint8_t>(std::lround(x + (y - x) * t)); };
+		return { lerp(a.R, b.R), lerp(a.G, b.G), lerp(a.B, b.B), lerp(a.A, b.A) };
+	}
+
 	// A subtle separator shade: lighter on dark colors, darker on light ones.
 	inline Color DividerColor(const Color &c, double strength = 0.15)
 	{

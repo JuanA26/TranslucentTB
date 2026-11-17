@@ -325,6 +325,11 @@ LRESULT TaskbarAttributeWorker::MessageHandler(UINT uMsg, WPARAM wParam, LPARAM 
 		OnMatchTimer();
 		return 0;
 	}
+	else if (uMsg == WM_TIMER && wParam == FADE_TIMER_ID)
+	{
+		OnFadeTimer();
+		return 0;
+	}
 	else if (uMsg == WM_SETTINGCHANGE)
 	{
 		if (InSendMessage())
@@ -635,16 +640,16 @@ void TaskbarAttributeWorker::ApplyAttribute(taskbar_iterator taskbar, TaskbarApp
 	// See comment in InsertWindow.
 	const auto taskbarInfo = taskbar->second.Taskbar;
 
-	// Window color matching: paint the taskbar solid with the app's edge color,
-	// and (if the line is shown) use a subtle shade of it as the divider.
+	// Window color matching: paint the taskbar with the app's edge color (alpha < 255 only while
+	// fading in/out), and (if the line is shown) use a subtle shade of it as the divider.
 	std::optional<Util::Color> divider;
-	if (const auto matched = taskbar->second.MatchedColor; cfg.MatchWindowColor && matched)
+	if (const auto shown = taskbar->second.ShownColor)
 	{
-		cfg.Accent = ACCENT_ENABLE_GRADIENT;
-		cfg.Color = *matched;
+		cfg.Accent = ACCENT_ENABLE_TRANSPARENTGRADIENT;
+		cfg.Color = *shown;
 		if (cfg.ShowLine)
 		{
-			divider = Util::ColorMatch::DividerColor(*matched);
+			divider = Util::ColorMatch::DividerColor(*shown);
 		}
 	}
 
@@ -787,9 +792,92 @@ bool TaskbarAttributeWorker::UpdateMatchedColor(taskbar_iterator taskbar, const 
 	if (changed)
 	{
 		matched = sampled;
+		BeginFade(taskbar->second, sampled);
 	}
 
 	return changed;
+}
+
+void TaskbarAttributeWorker::BeginFade(MonitorInfo &info, const std::optional<Util::Color> &target)
+{
+	// start from what's painted now; when nothing is, fade in from the target color at zero opacity
+	Util::Color from;
+	if (info.ShownColor)
+	{
+		from = *info.ShownColor;
+	}
+	else if (target)
+	{
+		from = { target->R, target->G, target->B, 0 };
+	}
+	else
+	{
+		return; // nothing shown, nothing to show
+	}
+
+	info.FadeFrom = from;
+	info.FadeTo = target ? *target : Util::Color { from.R, from.G, from.B, 0 }; // fade out = to transparent
+	info.FadeStart = std::chrono::steady_clock::now();
+	info.Fading = true;
+	info.ShownColor = from;
+
+	if (!m_FadeTimerRunning)
+	{
+		if (SetTimer(m_WindowHandle, FADE_TIMER_ID, FADE_FRAME_MS, nullptr))
+		{
+			m_FadeTimerRunning = true;
+		}
+		else
+		{
+			LastErrorHandle(spdlog::level::warn, L"Failed to start fade timer, switching color instantly");
+			info.Fading = false;
+			info.ShownColor = info.FadeTo.A == 0 ? std::nullopt : std::optional(info.FadeTo);
+		}
+	}
+}
+
+void TaskbarAttributeWorker::OnFadeTimer()
+{
+	const auto now = std::chrono::steady_clock::now();
+	std::vector<HMONITOR> toApply;
+	bool stillFading = false;
+
+	for (auto &[mon, info] : m_Taskbars)
+	{
+		if (!info.Fading)
+		{
+			continue;
+		}
+
+		const double t = (now - info.FadeStart) / FADE_DURATION;
+		if (t >= 1.0)
+		{
+			info.Fading = false;
+			info.ShownColor = info.FadeTo.A == 0 ? std::nullopt : std::optional(info.FadeTo);
+		}
+		else
+		{
+			info.ShownColor = Util::ColorMatch::Blend(info.FadeFrom, info.FadeTo, Util::ColorMatch::EaseOut(t));
+			stillFading = true;
+		}
+
+		toApply.push_back(mon);
+	}
+
+	if (!stillFading)
+	{
+		KillTimer(m_WindowHandle, FADE_TIMER_ID);
+		m_FadeTimerRunning = false;
+	}
+
+	// Apply after updating state: applying may pump messages that change m_Taskbars.
+	for (const auto mon : toApply)
+	{
+		if (const auto it = m_Taskbars.find(mon); it != m_Taskbars.end())
+		{
+			ApplyAttribute(it, GetConfig(it));
+		}
+	}
 }
 
 void TaskbarAttributeWorker::OnMatchTimer()

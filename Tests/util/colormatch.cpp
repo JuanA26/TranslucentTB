@@ -106,6 +106,28 @@ TEST(Util_ColorMatch_DividerColor, LighterOnDarkDarkerOnLight)
 	ASSERT_LT(Luminance(DividerColor({ 240, 240, 240 })), Luminance({ 240, 240, 240 }));
 }
 
+TEST(Util_ColorMatch_EaseOut, StartsAtZeroEndsAtOneAndClamps)
+{
+	ASSERT_DOUBLE_EQ(EaseOut(0.0), 0.0);
+	ASSERT_DOUBLE_EQ(EaseOut(1.0), 1.0);
+	ASSERT_DOUBLE_EQ(EaseOut(-1.0), 0.0);
+	ASSERT_DOUBLE_EQ(EaseOut(2.0), 1.0);
+	ASSERT_GT(EaseOut(0.5), 0.5); // ease-out is ahead of linear halfway through
+}
+
+TEST(Util_ColorMatch_Blend, BlendsAllChannelsIncludingAlpha)
+{
+	const Color from { 0, 100, 200, 0 };
+	const Color to { 200, 100, 0, 255 };
+	const auto mid = Blend(from, to, 0.5);
+	ASSERT_EQ(mid.R, 100);
+	ASSERT_EQ(mid.G, 100);
+	ASSERT_EQ(mid.B, 100);
+	ASSERT_EQ(mid.A, 128);
+	ASSERT_EQ(Blend(from, to, 0.0).A, 0);
+	ASSERT_EQ(Blend(from, to, 1.0).A, 255);
+}
+
 TEST(Util_ColorMatch_DividerColor, IsSubtle)
 {
 	const auto d = DividerColor({ 14, 14, 14 });

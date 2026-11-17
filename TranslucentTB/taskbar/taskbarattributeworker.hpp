@@ -60,6 +60,13 @@ private:
 		// TranslucentBarImproved: color sampled from the maximized app's edge next to the taskbar,
 		// when match_window_color applies and that edge is plain enough to match.
 		std::optional<Util::Color> MatchedColor;
+
+		// What is currently painted for matching (includes alpha while fading in/out),
+		// and the fade in progress towards MatchedColor (or towards transparent).
+		std::optional<Util::Color> ShownColor;
+		Util::Color FadeFrom, FadeTo;
+		std::chrono::steady_clock::time_point FadeStart;
+		bool Fading = false;
 	};
 
 	struct MonitorEnumInfo {
@@ -195,6 +202,14 @@ private:
 	std::optional<Util::Color> SampleMatchColor(taskbar_iterator taskbar, bool currentlyMatching) const;
 	bool UpdateMatchedColor(taskbar_iterator taskbar, const TaskbarAppearance &cfg);
 	void OnMatchTimer();
+
+	// Fading between matched colors (TranslucentBarImproved)
+	static constexpr UINT_PTR FADE_TIMER_ID = 0x54424E;
+	static constexpr UINT FADE_FRAME_MS = 15;
+	static constexpr std::chrono::duration<double> FADE_DURATION { 0.15 };
+	bool m_FadeTimerRunning = false;
+	void BeginFade(MonitorInfo &info, const std::optional<Util::Color> &target);
+	void OnFadeTimer();
 
 	// Attribute
 	void ShowAeroPeekButton(const TaskbarInfo &taskbar, bool show);
