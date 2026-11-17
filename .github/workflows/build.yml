@@ -1,0 +1,56 @@
+# Unsigned x64 build of this fork, producing the portable (unzip-and-run) app.
+# Mirrors upstream's Azure pipeline (.azp/templates/build.yml + upload.yml) minus
+# signing, MSIX upload and their private package caches.
+name: Build
+
+on:
+  push:
+    branches-ignore: [release]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2025
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.vcpkg-bincache
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Update app manifest (Dev identity)
+        run: .azp/scripts/update-manifest.ps1 -BuildType Dev
+
+      - name: Cache vcpkg binaries
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-x64-${{ hashFiles('**/vcpkg.json', '**/vcpkg-configuration.json', 'vcpkg/ports/**') }}
+          restore-keys: vcpkg-x64-
+
+      - name: Integrate vcpkg
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          C:\vcpkg\vcpkg.exe integrate install
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: '7.0.1'
+
+      - name: Restore NuGet packages
+        run: nuget restore TranslucentTB.slnx
+
+      - name: Build
+        run: msbuild TranslucentTB.slnx /m /p:Configuration=Release /p:Platform=x64 /p:BuildType=Dev
+
+      - name: Run unit tests
+        continue-on-error: true
+        run: x64\Release\Tests.exe
+
+      - name: Create portable build
+        run: .azp/scripts/create-portable.ps1 -Platform x64 -Configuration Release -WorkDir "${{ runner.temp }}" -OutputDir "${{ runner.temp }}\portable"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: TranslucentTB-portable-x64
+          path: ${{ runner.temp }}\portable
