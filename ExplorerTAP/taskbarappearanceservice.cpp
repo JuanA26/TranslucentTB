@@ -150,6 +150,30 @@ catch (...)
 	return winrt::to_hresult();
 }
 
+HRESULT TaskbarAppearanceService::SetTaskbarBorderColor(HWND taskbar, UINT color) try
+{
+	for (const auto& [handle, info] : m_Taskbars)
+	{
+		if (GetAncestor(info.window, GA_PARENT) == taskbar)
+		{
+			if (info.border.control && info.border.originalFill)
+			{
+				wux::Media::SolidColorBrush brush;
+				brush.Color(Util::Color::FromABGR(color));
+				info.border.control.Fill(brush);
+			}
+
+			break;
+		}
+	}
+
+	return S_OK;
+}
+catch (...)
+{
+	return winrt::to_hresult();
+}
+
 HRESULT TaskbarAppearanceService::RestoreAllTaskbarsToDefault() try
 {
 	for (const auto& [handle, info] : m_Taskbars)

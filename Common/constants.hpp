@@ -11,16 +11,18 @@
 static constexpr Util::null_terminated_wstring_view MUTEX_GUID = L"344635E9-9AE4-4E60-B128-D53E25AB70A7";
 
 // Event used to signal when the TAP is ready
-static constexpr Util::null_terminated_wstring_view TAP_READY_EVENT = L"TTBTAP_Ready";
+// (TranslucentBarImproved uses its own name, GUIDs and payload so its injected TAP
+// never gets mixed up with an official TranslucentTB TAP already loaded in Explorer)
+static constexpr Util::null_terminated_wstring_view TAP_READY_EVENT = L"TTBImprovedTAP_Ready";
 
 // Current version of the API used for IPC with the TAP
-static constexpr std::uint32_t TAP_API_VERSION = 4;
+static constexpr std::uint32_t TAP_API_VERSION = 5;
 
 // Tray icon GUID
 static constexpr GUID TRAY_GUID = { 0xA7E6B7AF, 0xDF89, 0x41BD, { 0x8D, 0x78, 0x60, 0xE5, 0x8F, 0x83, 0x3E, 0x0 } };
 
 // GUID of payload injected in Explorer
-static constexpr GUID EXPLORER_PAYLOAD = { 0xF5E0B1A9, 0x9D5D, 0x4EB3, { 0x8F, 0x6D, 0x1F, 0x4D, 0x43, 0xD7, 0xCD, 0x0E } };
+static constexpr GUID EXPLORER_PAYLOAD = { 0xEE386795, 0x95D7, 0x400C, { 0xB7, 0x3B, 0x77, 0xF1, 0x60, 0x8F, 0x4A, 0xF7 } };
 
 #pragma endregion
 

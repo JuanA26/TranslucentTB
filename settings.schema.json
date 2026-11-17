@@ -29,6 +29,10 @@
           "type": "number",
           "minimum": 0,
           "maximum": 750
+        },
+        "match_window_color": {
+          "type": "boolean",
+          "description": "While a window is maximized, paint the taskbar with the color of the app's edge next to it (show_line draws a matching divider). Falls back to accent/color when that edge is too busy."
         }
       },
       "type": "object"

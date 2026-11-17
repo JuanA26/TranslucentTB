@@ -33,6 +33,7 @@ public:
 	HRESULT STDMETHODCALLTYPE ReturnTaskbarToDefaultAppearance(HWND taskbar) override;
 
 	HRESULT STDMETHODCALLTYPE SetTaskbarBorderVisibility(HWND taskbar, BOOL visible) override;
+	HRESULT STDMETHODCALLTYPE SetTaskbarBorderColor(HWND taskbar, UINT color) override;
 
 	HRESULT STDMETHODCALLTYPE RestoreAllTaskbarsToDefault() override;
 	HRESULT STDMETHODCALLTYPE RestoreAllTaskbarsToDefaultWhenProcessDies(DWORD pid) override;

@@ -26,6 +26,7 @@
 #include "undoc/user32.hpp"
 #include "undoc/uxtheme.hpp"
 #include "util/color.hpp"
+#include "util/colormatch.hpp"
 #include "util/null_terminated_string_view.hpp"
 #include "wilx.hpp"
 #include "../ProgramLog/error/win32.hpp"
@@ -55,6 +56,10 @@ private:
 		TaskbarInfo Taskbar;
 		std::unordered_set<Window> MaximisedWindows;
 		std::unordered_set<Window> NormalWindows;
+
+		// TranslucentBarImproved: color sampled from the maximized app's edge next to the taskbar,
+		// when match_window_color applies and that edge is plain enough to match.
+		std::optional<Util::Color> MatchedColor;
 	};
 
 	struct MonitorEnumInfo {
@@ -181,11 +186,22 @@ private:
 	// Config
 	TaskbarAppearance GetConfig(taskbar_iterator taskbar) const;
 
+	// Window color matching (TranslucentBarImproved)
+	static constexpr UINT_PTR MATCH_TIMER_ID = 0x54424D;
+	static constexpr UINT MATCH_INTERVAL_MS = 100;
+	static constexpr double MATCH_START_COVERAGE = 0.60; // share of strip pixels that must match to start
+	static constexpr double MATCH_KEEP_COVERAGE = 0.45;  // ...and to keep matching once started
+	static constexpr double MATCH_MIN_TEXT_CONTRAST = 3.0;
+	std::optional<Util::Color> SampleMatchColor(taskbar_iterator taskbar, bool currentlyMatching) const;
+	bool UpdateMatchedColor(taskbar_iterator taskbar, const TaskbarAppearance &cfg);
+	void OnMatchTimer();
+
 	// Attribute
 	void ShowAeroPeekButton(const TaskbarInfo &taskbar, bool show);
 	void ShowTaskbarLine(const TaskbarInfo &taskbar, bool show);
 	void SetAttribute(taskbar_iterator taskbar, TaskbarAppearance config);
 	void RefreshAttribute(taskbar_iterator taskbar);
+	void ApplyAttribute(taskbar_iterator taskbar, TaskbarAppearance cfg);
 	void RefreshAllAttributes();
 
 	// Log
@@ -225,7 +241,9 @@ private:
 		const auto &preview = m_ColorPreviews.at(static_cast<std::size_t>(state));
 		if (preview)
 		{
-			return { appearance.Accent, *preview, appearance.ShowPeek, appearance.ShowLine, appearance.BlurRadius };
+			TaskbarAppearance withPreview = { appearance.Accent, *preview, appearance.ShowPeek, appearance.ShowLine, appearance.BlurRadius };
+			withPreview.MatchWindowColor = appearance.MatchWindowColor;
+			return withPreview;
 		}
 		else
 		{

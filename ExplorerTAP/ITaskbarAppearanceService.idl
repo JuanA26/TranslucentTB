@@ -1,7 +1,7 @@
 import "unknwn.idl";
 import "TaskbarBrush.idl";
 
-[object, uuid(5bcf9150-c28a-4ef2-913c-4c3ea2f5ead0)]
+[object, uuid(0637516f-15ae-46f7-b6fb-c88063e3e1ff)]
 interface ITaskbarAppearanceService : IUnknown
 {
 	HRESULT SetTaskbarAppearance([in] HWND taskbar, [in] enum TaskbarBrush brush, [in] UINT color);
@@ -14,4 +14,7 @@ interface ITaskbarAppearanceService : IUnknown
 	HRESULT RestoreAllTaskbarsToDefaultWhenProcessDies([in] DWORD pid);
 
 	HRESULT KillExplorerWhenPackageUninstalls([in, string] LPCWSTR packageFullName);
+
+	// TranslucentBarImproved: paint the taskbar's top border (divider) with a solid color.
+	HRESULT SetTaskbarBorderColor([in] HWND taskbar, [in] UINT color);
 };

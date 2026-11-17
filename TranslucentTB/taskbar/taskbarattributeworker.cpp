@@ -320,7 +320,12 @@ LRESULT TaskbarAttributeWorker::OnRequestAttributeRefresh(LPARAM lParam)
 
 LRESULT TaskbarAttributeWorker::MessageHandler(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	if (uMsg == WM_SETTINGCHANGE)
+	if (uMsg == WM_TIMER && wParam == MATCH_TIMER_ID)
+	{
+		OnMatchTimer();
+		return 0;
+	}
+	else if (uMsg == WM_SETTINGCHANGE)
 	{
 		if (InSendMessage())
 		{
@@ -618,17 +623,43 @@ void TaskbarAttributeWorker::SetAttribute(taskbar_iterator taskbar, TaskbarAppea
 
 void TaskbarAttributeWorker::RefreshAttribute(taskbar_iterator taskbar)
 {
+	auto cfg = GetConfig(taskbar);
+	UpdateMatchedColor(taskbar, cfg);
+	ApplyAttribute(taskbar, std::move(cfg));
+}
+
+void TaskbarAttributeWorker::ApplyAttribute(taskbar_iterator taskbar, TaskbarAppearance cfg)
+{
 	// These functions may trigger Windows internal message loops,
 	// do not pass any member of taskbar map by reference.
 	// See comment in InsertWindow.
 	const auto taskbarInfo = taskbar->second.Taskbar;
 
-	const auto &cfg = GetConfig(taskbar);
+	// Window color matching: paint the taskbar solid with the app's edge color,
+	// and (if the line is shown) use a subtle shade of it as the divider.
+	std::optional<Util::Color> divider;
+	if (const auto matched = taskbar->second.MatchedColor; cfg.MatchWindowColor && matched)
+	{
+		cfg.Accent = ACCENT_ENABLE_GRADIENT;
+		cfg.Color = *matched;
+		if (cfg.ShowLine)
+		{
+			divider = Util::ColorMatch::DividerColor(*matched);
+		}
+	}
+
 	SetAttribute(taskbar, cfg);
 
 	if (m_TaskbarService)
 	{
-		HresultVerify(m_TaskbarService->SetTaskbarBorderVisibility(taskbarInfo.TaskbarWindow, cfg.ShowLine), spdlog::level::info, L"Failed to set taskbar border visibility");
+		if (divider)
+		{
+			HresultVerify(m_TaskbarService->SetTaskbarBorderColor(taskbarInfo.TaskbarWindow, divider->ToABGR()), spdlog::level::info, L"Failed to set taskbar border color");
+		}
+		else
+		{
+			HresultVerify(m_TaskbarService->SetTaskbarBorderVisibility(taskbarInfo.TaskbarWindow, cfg.ShowLine), spdlog::level::info, L"Failed to set taskbar border visibility");
+		}
 	}
 	else if (taskbarInfo.InnerXamlContent || taskbarInfo.WorkerWWindow)
 	{
@@ -640,6 +671,145 @@ void TaskbarAttributeWorker::RefreshAttribute(taskbar_iterator taskbar)
 		if (!m_PeekActive)
 		{
 			ShowAeroPeekButton(taskbarInfo, cfg.ShowPeek);
+		}
+	}
+}
+
+std::optional<Util::Color> TaskbarAttributeWorker::SampleMatchColor(taskbar_iterator taskbar, bool currentlyMatching) const
+{
+	const auto taskbarRect = taskbar->second.Taskbar.TaskbarWindow.rect();
+	MONITORINFO mi = { sizeof(mi) };
+	if (!taskbarRect || !GetMonitorInfo(taskbar->first, &mi))
+	{
+		return std::nullopt;
+	}
+
+	// A few pixel rows of the app right next to the taskbar, on whichever edge it sits.
+	static constexpr LONG ROWS = 3, GAP = 1;
+	const RECT &tb = *taskbarRect;
+	const RECT &mon = mi.rcMonitor;
+	RECT strip;
+	if (tb.right - tb.left >= tb.bottom - tb.top)
+	{
+		strip = tb.bottom >= mon.bottom
+			? RECT { tb.left, tb.top - GAP - ROWS, tb.right, tb.top - GAP }
+			: RECT { tb.left, tb.bottom + GAP, tb.right, tb.bottom + GAP + ROWS };
+	}
+	else
+	{
+		strip = tb.right >= mon.right
+			? RECT { tb.left - GAP - ROWS, tb.top, tb.left - GAP, tb.bottom }
+			: RECT { tb.right + GAP, tb.top, tb.right + GAP + ROWS, tb.bottom };
+	}
+
+	RECT area;
+	if (!IntersectRect(&area, &strip, &mon))
+	{
+		return std::nullopt; // auto-hidden or off-screen taskbar
+	}
+
+	const int width = area.right - area.left;
+	const int height = area.bottom - area.top;
+	std::vector<std::uint8_t> raw(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
+	bool captured = false;
+
+	if (const HDC screen = GetDC(nullptr))
+	{
+		if (const HDC mem = CreateCompatibleDC(screen))
+		{
+			if (const HBITMAP bmp = CreateCompatibleBitmap(screen, width, height))
+			{
+				const HGDIOBJ old = SelectObject(mem, bmp);
+				const bool blitted = BitBlt(mem, 0, 0, width, height, screen, area.left, area.top, SRCCOPY) != FALSE;
+				SelectObject(mem, old);
+
+				if (blitted)
+				{
+					BITMAPINFO bi = { };
+					bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+					bi.bmiHeader.biWidth = width;
+					bi.bmiHeader.biHeight = -height; // top-down
+					bi.bmiHeader.biPlanes = 1;
+					bi.bmiHeader.biBitCount = 32;
+					bi.bmiHeader.biCompression = BI_RGB;
+					captured = GetDIBits(mem, bmp, 0, static_cast<UINT>(height), raw.data(), &bi, DIB_RGB_COLORS) == height;
+				}
+
+				DeleteObject(bmp);
+			}
+
+			DeleteDC(mem);
+		}
+
+		ReleaseDC(nullptr, screen);
+	}
+
+	if (!captured)
+	{
+		return std::nullopt;
+	}
+
+	// every other pixel along the strip is plenty, and halves the work
+	std::vector<Util::Color> pixels;
+	pixels.reserve(raw.size() / 8);
+	for (std::size_t i = 0; i + 3 < raw.size(); i += 8)
+	{
+		pixels.push_back({ raw[i + 2], raw[i + 1], raw[i] }); // BGRA -> RGB
+	}
+
+	const auto pick = Util::ColorMatch::PickDominant(pixels);
+	if (!pick || pick->coverage < (currentlyMatching ? MATCH_KEEP_COVERAGE : MATCH_START_COVERAGE))
+	{
+		return std::nullopt;
+	}
+
+	// taskbar icons and clock are white when the system theme is dark
+	const bool lightText = !ShouldSystemUseDarkMode || ShouldSystemUseDarkMode();
+	auto color = Util::ColorMatch::EnsureReadable(pick->color, lightText, MATCH_MIN_TEXT_CONTRAST);
+	color.A = 255;
+	return color;
+}
+
+bool TaskbarAttributeWorker::UpdateMatchedColor(taskbar_iterator taskbar, const TaskbarAppearance &cfg)
+{
+	auto &matched = taskbar->second.MatchedColor;
+
+	std::optional<Util::Color> sampled;
+	if (cfg.MatchWindowColor && !taskbar->second.MaximisedWindows.empty())
+	{
+		sampled = SampleMatchColor(taskbar, matched.has_value());
+	}
+
+	// ignore 1-2 unit jitter from animated content so we don't spam Explorer with brush updates
+	const bool changed = matched.has_value() != sampled.has_value() ||
+		(sampled && Util::ColorMatch::impl::Distance(*matched, *sampled) > 2);
+
+	if (changed)
+	{
+		matched = sampled;
+	}
+
+	return changed;
+}
+
+void TaskbarAttributeWorker::OnMatchTimer()
+{
+	// Sample first, refresh after: refreshing may pump messages that change m_Taskbars.
+	std::vector<HMONITOR> changed;
+	for (auto it = m_Taskbars.begin(); it != m_Taskbars.end(); ++it)
+	{
+		const auto cfg = GetConfig(it);
+		if ((cfg.MatchWindowColor || it->second.MatchedColor) && UpdateMatchedColor(it, cfg))
+		{
+			changed.push_back(it->first);
+		}
+	}
+
+	for (const auto mon : changed)
+	{
+		if (const auto it = m_Taskbars.find(mon); it != m_Taskbars.end())
+		{
+			ApplyAttribute(it, GetConfig(it));
 		}
 	}
 }
@@ -1289,6 +1459,12 @@ TaskbarAttributeWorker::TaskbarAttributeWorker(ConfigManager &cfgManager, HINSTA
 
 	// we don't want to consider the first state reset as an Explorer restart.
 	ResetState(true);
+
+	// TranslucentBarImproved: periodically re-sample maximized windows for match_window_color.
+	if (!SetTimer(m_WindowHandle, MATCH_TIMER_ID, MATCH_INTERVAL_MS, nullptr))
+	{
+		LastErrorHandle(spdlog::level::warn, L"Failed to start window color matching timer");
+	}
 }
 
 void TaskbarAttributeWorker::DumpState()

@@ -27,6 +27,9 @@ struct TaskbarAppearance {
 	bool ShowPeek = true;
 	bool ShowLine = true;
 	float BlurRadius = 9.0f;
+	// TranslucentBarImproved: while a window is maximized, paint the taskbar with the color
+	// of the app's bottom edge (falls back to Accent/Color when that edge is too busy).
+	bool MatchWindowColor = false;
 
 	constexpr TaskbarAppearance() noexcept = default;
 	constexpr TaskbarAppearance(ACCENT_STATE accent, Util::Color color, bool showPeek, bool showLine, float blurRadius) noexcept :
@@ -46,6 +49,10 @@ struct TaskbarAppearance {
 		rjh::Serialize(writer, ShowPeek, SHOW_PEEK_KEY);
 		rjh::Serialize(writer, ShowLine, SHOW_LINE_KEY);
 		rjh::Serialize(writer, BlurRadius, RADIUS_KEY);
+		if (MatchWindowColor)
+		{
+			rjh::Serialize(writer, MatchWindowColor, MATCH_WINDOW_COLOR_KEY);
+		}
 	}
 
 	void Deserialize(const rjh::value_t &obj, void (*unknownKeyCallback)(std::wstring_view))
@@ -101,6 +108,10 @@ protected:
 				BlurRadius = 750;
 			}
 		}
+		else if (key == MATCH_WINDOW_COLOR_KEY)
+		{
+			rjh::Deserialize(val, MatchWindowColor, key);
+		}
 		else if (unknownKeyCallback)
 		{
 			unknownKeyCallback(key);
@@ -121,6 +132,7 @@ private:
 	static constexpr std::wstring_view SHOW_PEEK_KEY = L"show_peek";
 	static constexpr std::wstring_view SHOW_LINE_KEY = L"show_line";
 	static constexpr std::wstring_view RADIUS_KEY = L"blur_radius";
+	static constexpr std::wstring_view MATCH_WINDOW_COLOR_KEY = L"match_window_color";
 #endif
 
 #ifdef HAS_WINRT_CONFIG

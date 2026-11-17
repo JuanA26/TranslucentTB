@@ -16,6 +16,9 @@
       <Filter>Util Tests</Filter>
     </ClCompile>
     <ClCompile Include="win32.cpp" />
+    <ClCompile Include="util\colormatch.cpp">
+      <Filter>Util Tests</Filter>
+    </ClCompile>
     <ClCompile Include="util\color.cpp">
       <Filter>Util Tests</Filter>
     </ClCompile>

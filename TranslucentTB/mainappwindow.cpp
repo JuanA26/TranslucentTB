@@ -119,6 +119,9 @@ void MainAppWindow::TaskbarSettingsChanged(const txmp::TaskbarState &state, cons
 	// restore color because the context menu doesn't transmit that info
 	appearance.Color(config.Color);
 
+	// same for match_window_color, which the menu doesn't know about
+	const bool matchWindowColor = config.MatchWindowColor;
+
 	if (const auto optAppearance = appearance.try_as<txmp::OptionalTaskbarAppearance>())
 	{
 		if (state == txmp::TaskbarState::Desktop) [[unlikely]]
@@ -132,6 +135,8 @@ void MainAppWindow::TaskbarSettingsChanged(const txmp::TaskbarState &state, cons
 	{
 		config = appearance;
 	}
+
+	config.MatchWindowColor = matchWindowColor;
 
 	m_App.GetWorker().ConfigurationChanged();
 }
