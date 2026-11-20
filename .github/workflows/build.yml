@@ -40,6 +40,11 @@ jobs:
       - name: Restore NuGet packages
         run: nuget restore TranslucentTB.slnx
 
+      # Build this small native dependency first so compiler/linker failures do
+      # not wait for the much larger XAML build to finish before surfacing.
+      - name: Build Explorer hooks
+        run: msbuild ExplorerHooks\ExplorerHooks.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:BuildType=Dev
+
       - name: Build
         run: msbuild TranslucentTB.slnx /m /p:Configuration=Release /p:Platform=x64 /p:BuildType=Dev
 

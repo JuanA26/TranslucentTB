@@ -129,10 +129,13 @@ DWORD WINAPI TaskViewVisibilityMonitor::ThreadProc(LPVOID) noexcept
 	// if we just return, the code in Uninstall might terminate the thread while the CRT is
 	// cleaning up thread-local structures in a lock, resulting in an abandonned lock.
 	// so once the CRT is unloaded, it deadlocks the GUI thread.
-	Sleep(INFINITE);
+	for (;;)
+	{
+		Sleep(INFINITE);
 
-	// if the thread somehow gets resumed, something is very wrong.
-	__fastfail(FAST_FAIL_FATAL_APP_EXIT);
+		// if the thread somehow gets resumed, something is very wrong.
+		__fastfail(FAST_FAIL_FATAL_APP_EXIT);
+	}
 }
 
 LRESULT CALLBACK TaskViewVisibilityMonitor::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) noexcept
