@@ -7,10 +7,11 @@
 #include <iterator>
 #include <optional>
 #include <span>
+#include <vector>
 
 #include "color.hpp"
 
-// Picks one color out of the strip of pixels just above the taskbar, and keeps
+// Picks a stable background from a band of app pixels next to the taskbar, and keeps
 // taskbar icons/text readable on it. Pure functions, no Windows APIs.
 namespace Util::ColorMatch {
 	struct PickResult {
@@ -109,6 +110,48 @@ namespace Util::ColorMatch {
 	{
 		const auto lerp = [t](std::uint8_t x, std::uint8_t y) { return static_cast<std::uint8_t>(std::lround(x + (y - x) * t)); };
 		return { lerp(a.R, b.R), lerp(a.G, b.G), lerp(a.B, b.B), a.A };
+	}
+
+	// Row-major grid: columns run along the taskbar, rows run away from it.
+	// Matching side margins identify the surrounding UI in document viewers, where
+	// a white page can otherwise take over the sample as it scrolls past the edge.
+	// With no shared surround, blend the area mean toward its dominant background.
+	// The continuous weight avoids a hard coverage threshold (and transparent gaps).
+	inline std::optional<Color> PickBackground(std::span<const Color> pixels, std::size_t columns)
+	{
+		if (columns < 8 || pixels.empty() || pixels.size() % columns != 0)
+		{
+			return std::nullopt;
+		}
+
+		std::vector<Color> left, right;
+		impl::Accumulator all;
+		const std::size_t margin = columns / 8;
+		for (std::size_t i = 0; i < pixels.size(); ++i)
+		{
+			all.Add(pixels[i]);
+			const auto x = i % columns;
+			if (x < margin) left.push_back(pixels[i]);
+			if (x >= columns - margin) right.push_back(pixels[i]);
+		}
+
+		const auto l = PickDominant(left);
+		const auto r = PickDominant(right);
+		if (l->coverage >= 0.65 && r->coverage >= 0.65 && impl::Distance(l->color, r->color) <= 24)
+		{
+			return Mix(l->color, r->color, 0.5);
+		}
+
+		const auto dominant = PickDominant(pixels);
+		const double weight = std::clamp((dominant->coverage - 0.5) / 0.35, 0.0, 1.0);
+		return Mix(all.Mean(), dominant->color, weight);
+	}
+
+	// A time-based low-pass filter: event bursts must not accelerate adaptation.
+	// Reset at app changes so a new window never inherits the old window's tint.
+	inline Color SmoothBackground(const Color &previous, const Color &sample, double elapsedSeconds)
+	{
+		return Mix(previous, sample, 1.0 - std::exp(-std::max(0.0, elapsedSeconds) / 0.35));
 	}
 
 	// Nudge the color toward black (white taskbar text) or white (black taskbar text)

@@ -44,7 +44,6 @@ jobs:
         run: msbuild TranslucentTB.slnx /m /p:Configuration=Release /p:Platform=x64 /p:BuildType=Dev
 
       - name: Run unit tests
-        continue-on-error: true
         run: x64\Release\Tests.exe
 
       - name: Create portable build

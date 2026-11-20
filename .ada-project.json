@@ -1,0 +1,7 @@
+{
+  "setup": [],
+  "checks": [
+    "git diff --check",
+    "python -m compileall -q tools/livecheck"
+  ]
+}

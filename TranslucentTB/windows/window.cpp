@@ -203,7 +203,10 @@ bool Window::is_user_window() const
 
 				// check the window does not have WS_EX_NOACTIVATE (or if it does, it has WS_EX_APPWINDOW)
 				// then check if it's on the current virtual desktop (currently, a cloak check also catches these, but it's an implementation detail)
-				return (!is_no_activate || is_app_window) && on_current_desktop().value_or(false);
+				// Visibility and DWM cloaking already exclude other desktops. If the
+				// shell's virtual-desktop service is temporarily unavailable (e.g. after
+				// Explorer restarts), do not discard every otherwise eligible app.
+				return (!is_no_activate || is_app_window) && on_current_desktop().value_or(true);
 			}
 		}
 	}

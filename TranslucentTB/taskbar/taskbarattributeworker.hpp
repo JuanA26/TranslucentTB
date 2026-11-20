@@ -57,9 +57,11 @@ private:
 		std::unordered_set<Window> MaximisedWindows;
 		std::unordered_set<Window> NormalWindows;
 
-		// TranslucentBarImproved: color sampled from the maximized app's edge next to the taskbar,
-		// when match_window_color applies and that edge is plain enough to match.
+		// Stable background sampled from a band inside the topmost maximized app.
 		std::optional<Util::Color> MatchedColor;
+		Window MatchSource;
+		std::optional<Util::Color> FilteredColor;
+		std::chrono::steady_clock::time_point LastSample;
 
 		// What is currently painted for matching (includes alpha while fading in/out),
 		// and the fade in progress towards MatchedColor (or towards transparent).
@@ -196,17 +198,17 @@ private:
 	// Window color matching (TranslucentBarImproved)
 	static constexpr UINT_PTR MATCH_TIMER_ID = 0x54424D;
 	static constexpr UINT MATCH_INTERVAL_MS = 100;
-	static constexpr double MATCH_START_COVERAGE = 0.60; // share of strip pixels that must match to start
-	static constexpr double MATCH_KEEP_COVERAGE = 0.45;  // ...and to keep matching once started
 	static constexpr double MATCH_MIN_TEXT_CONTRAST = 3.0;
-	std::optional<Util::Color> SampleMatchColor(taskbar_iterator taskbar, bool currentlyMatching) const;
+	std::optional<Util::Color> SampleMatchColor(taskbar_iterator taskbar, Window source) const;
 	bool UpdateMatchedColor(taskbar_iterator taskbar, const TaskbarAppearance &cfg);
 	void OnMatchTimer();
+	bool m_MatchTimerActive = false;
+	std::chrono::steady_clock::time_point m_LastWindowReconcile;
 
 	// Fading between matched colors (TranslucentBarImproved)
 	static constexpr UINT_PTR FADE_TIMER_ID = 0x54424E;
 	static constexpr UINT FADE_FRAME_MS = 15;
-	static constexpr std::chrono::duration<double> FADE_DURATION { 0.15 };
+	static constexpr std::chrono::duration<double> FADE_DURATION { 0.25 };
 	bool m_FadeTimerRunning = false;
 	void BeginFade(MonitorInfo &info, const std::optional<Util::Color> &target);
 	void OnFadeTimer();

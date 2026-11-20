@@ -157,6 +157,9 @@ void TaskbarAttributeWorker::OnForegroundWindowChange(DWORD, HWND hwnd, LONG idO
 
 		if (m_ForegroundWindow)
 		{
+			// Some apps restore/maximize without a usable location-change event.
+			// Recheck membership before selecting the appearance for this foreground.
+			InsertWindow(m_ForegroundWindow, true);
 			if (auto newMonitor = m_ForegroundWindow.monitor(); newMonitor != oldMonitor)
 			{
 				if (const auto it = m_Taskbars.find(newMonitor); it != m_Taskbars.end())
@@ -680,7 +683,7 @@ void TaskbarAttributeWorker::ApplyAttribute(taskbar_iterator taskbar, TaskbarApp
 	}
 }
 
-std::optional<Util::Color> TaskbarAttributeWorker::SampleMatchColor(taskbar_iterator taskbar, bool currentlyMatching) const
+std::optional<Util::Color> TaskbarAttributeWorker::SampleMatchColor(taskbar_iterator taskbar, Window source) const
 {
 	const auto taskbarRect = taskbar->second.Taskbar.TaskbarWindow.rect();
 	MONITORINFO mi = { sizeof(mi) };
@@ -689,32 +692,39 @@ std::optional<Util::Color> TaskbarAttributeWorker::SampleMatchColor(taskbar_iter
 		return std::nullopt;
 	}
 
-	// A few pixel rows of the app right next to the taskbar, on whichever edge it sits.
-	static constexpr LONG ROWS = 3, GAP = 1;
+	// Sample a DPI-scaled band, rather than the last three rows. Keep the capture
+	// small and constant-sized even on 4K displays. Skip the resize border/divider.
+	const UINT windowDpi = GetDpiForWindow(source);
+	const int dpi = static_cast<int>(windowDpi ? windowDpi : USER_DEFAULT_SCREEN_DPI);
+	const LONG depth = MulDiv(192, dpi, USER_DEFAULT_SCREEN_DPI);
+	const LONG gap = MulDiv(4, dpi, USER_DEFAULT_SCREEN_DPI);
 	const RECT &tb = *taskbarRect;
 	const RECT &mon = mi.rcMonitor;
+	const bool horizontal = tb.right - tb.left >= tb.bottom - tb.top;
 	RECT strip;
-	if (tb.right - tb.left >= tb.bottom - tb.top)
+	if (horizontal)
 	{
 		strip = tb.bottom >= mon.bottom
-			? RECT { tb.left, tb.top - GAP - ROWS, tb.right, tb.top - GAP }
-			: RECT { tb.left, tb.bottom + GAP, tb.right, tb.bottom + GAP + ROWS };
+			? RECT { tb.left, tb.top - gap - depth, tb.right, tb.top - gap }
+			: RECT { tb.left, tb.bottom + gap, tb.right, tb.bottom + gap + depth };
 	}
 	else
 	{
 		strip = tb.right >= mon.right
-			? RECT { tb.left - GAP - ROWS, tb.top, tb.left - GAP, tb.bottom }
-			: RECT { tb.right + GAP, tb.top, tb.right + GAP + ROWS, tb.bottom };
+			? RECT { tb.left - gap - depth, tb.top, tb.left - gap, tb.bottom }
+			: RECT { tb.right + gap, tb.top, tb.right + gap + depth, tb.bottom };
 	}
 
 	RECT area;
-	if (!IntersectRect(&area, &strip, &mon))
+	const auto sourceRect = source.rect();
+	if (!sourceRect || !IntersectRect(&area, &strip, &mi.rcWork) || !IntersectRect(&area, &area, &*sourceRect))
 	{
 		return std::nullopt; // auto-hidden or off-screen taskbar
 	}
 
-	const int width = area.right - area.left;
-	const int height = area.bottom - area.top;
+	static constexpr int COLUMNS = 96, ROWS = 16;
+	const int width = horizontal ? COLUMNS : ROWS;
+	const int height = horizontal ? ROWS : COLUMNS;
 	std::vector<std::uint8_t> raw(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
 	bool captured = false;
 
@@ -725,7 +735,9 @@ std::optional<Util::Color> TaskbarAttributeWorker::SampleMatchColor(taskbar_iter
 			if (const HBITMAP bmp = CreateCompatibleBitmap(screen, width, height))
 			{
 				const HGDIOBJ old = SelectObject(mem, bmp);
-				const bool blitted = BitBlt(mem, 0, 0, width, height, screen, area.left, area.top, SRCCOPY) != FALSE;
+				SetStretchBltMode(mem, COLORONCOLOR);
+				const bool blitted = StretchBlt(mem, 0, 0, width, height, screen, area.left, area.top,
+					area.right - area.left, area.bottom - area.top, SRCCOPY) != FALSE;
 				SelectObject(mem, old);
 
 				if (blitted)
@@ -754,35 +766,74 @@ std::optional<Util::Color> TaskbarAttributeWorker::SampleMatchColor(taskbar_iter
 		return std::nullopt;
 	}
 
-	// every other pixel along the strip is plenty, and halves the work
+	// Normalize vertical taskbars too: columns always run along the taskbar.
 	std::vector<Util::Color> pixels;
-	pixels.reserve(raw.size() / 8);
-	for (std::size_t i = 0; i + 3 < raw.size(); i += 8)
+	pixels.reserve(COLUMNS * ROWS);
+	for (int row = 0; row < ROWS; ++row)
 	{
-		pixels.push_back({ raw[i + 2], raw[i + 1], raw[i] }); // BGRA -> RGB
+		for (int col = 0; col < COLUMNS; ++col)
+		{
+			const auto i = static_cast<std::size_t>(horizontal ? row * width + col : col * width + row) * 4;
+			pixels.push_back({ raw[i + 2], raw[i + 1], raw[i] }); // BGRA -> RGB
+		}
 	}
 
-	const auto pick = Util::ColorMatch::PickDominant(pixels);
-	if (!pick || pick->coverage < (currentlyMatching ? MATCH_KEEP_COVERAGE : MATCH_START_COVERAGE))
-	{
-		return std::nullopt;
-	}
-
-	// taskbar icons and clock are white when the system theme is dark
-	const bool lightText = !ShouldSystemUseDarkMode || ShouldSystemUseDarkMode();
-	auto color = Util::ColorMatch::EnsureReadable(pick->color, lightText, MATCH_MIN_TEXT_CONTRAST);
-	color.A = 255;
-	return color;
+	return Util::ColorMatch::PickBackground(pixels, COLUMNS);
 }
 
 bool TaskbarAttributeWorker::UpdateMatchedColor(taskbar_iterator taskbar, const TaskbarAppearance &cfg)
 {
-	auto &matched = taskbar->second.MatchedColor;
+	auto &info = taskbar->second;
+	auto &matched = info.MatchedColor;
 
 	std::optional<Util::Color> sampled;
-	if (cfg.MatchWindowColor && !taskbar->second.MaximisedWindows.empty())
+	Window source;
+	if (cfg.MatchWindowColor && !info.MaximisedWindows.empty())
 	{
-		sampled = SampleMatchColor(taskbar, matched.has_value());
+		for (const Window window : Window::DesktopWindow().get_ordered_childrens())
+		{
+			if (info.MaximisedWindows.contains(window) && window.visible() && window.maximised() &&
+				!window.minimised() && !window.cloaked() && window.monitor() == taskbar->first)
+			{
+				source = window;
+				break;
+			}
+		}
+	}
+
+	if (source)
+	{
+		const auto now = std::chrono::steady_clock::now();
+		const bool newSource = source != info.MatchSource;
+		const double elapsed = std::chrono::duration<double>(now - info.LastSample).count();
+		if (newSource || elapsed >= 0.075)
+		{
+			const auto background = SampleMatchColor(taskbar, source);
+			if (newSource)
+			{
+				info.MatchSource = source;
+				info.FilteredColor = background;
+			}
+			else if (background)
+			{
+				info.FilteredColor = info.FilteredColor
+					? Util::ColorMatch::SmoothBackground(*info.FilteredColor, *background, elapsed)
+					: *background;
+			}
+			info.LastSample = now;
+		}
+
+		// A failed capture must not expose wallpaper. Retain this app's last sample;
+		// on its first frame use a neutral system-theme surface until capture recovers.
+		const bool lightText = !ShouldSystemUseDarkMode || ShouldSystemUseDarkMode();
+		const auto background = info.FilteredColor.value_or(lightText
+			? Util::Color { 32, 32, 32 } : Util::Color { 243, 243, 243 });
+		sampled = Util::ColorMatch::EnsureReadable(background, lightText, MATCH_MIN_TEXT_CONTRAST);
+	}
+	else
+	{
+		info.MatchSource = Window::NullWindow;
+		info.FilteredColor.reset();
 	}
 
 	// ignore 1-2 unit jitter from animated content so we don't spam Explorer with brush updates
@@ -882,6 +933,41 @@ void TaskbarAttributeWorker::OnFadeTimer()
 
 void TaskbarAttributeWorker::OnMatchTimer()
 {
+	if (m_ResettingState || m_MatchTimerActive)
+	{
+		return;
+	}
+	m_MatchTimerActive = true;
+	const auto guard = wil::scope_exit([this] { m_MatchTimerActive = false; });
+
+	// WinEvents can arrive before an app finishes changing its styles, or be
+	// missed altogether. Reconcile once a second, including destroyed handles.
+	const auto now = std::chrono::steady_clock::now();
+	const auto &config = m_ConfigManager.GetConfig();
+	if ((config.MaximisedWindowAppearance.MatchWindowColor || config.MaximisedWindowAppearance.HasRules() ||
+		config.VisibleWindowAppearance.MatchWindowColor || config.VisibleWindowAppearance.HasRules() ||
+		config.DesktopAppearance.MatchWindowColor) && now - m_LastWindowReconcile >= std::chrono::seconds(1))
+	{
+		m_LastWindowReconcile = now;
+		std::unordered_set<Window> windows;
+		for (const auto &[mon, info] : m_Taskbars)
+		{
+			windows.insert(info.MaximisedWindows.begin(), info.MaximisedWindows.end());
+			windows.insert(info.NormalWindows.begin(), info.NormalWindows.end());
+		}
+		for (const Window window : Window::FindEnum())
+		{
+			windows.insert(window);
+		}
+		// InsertWindow may pump messages: keep no taskbar iterators across it.
+		for (const Window window : windows)
+		{
+			InsertWindow(window, false);
+		}
+		RefreshAllAttributes();
+		return;
+	}
+
 	// Sample first, refresh after: refreshing may pump messages that change m_Taskbars.
 	std::vector<HMONITOR> changed;
 	for (auto it = m_Taskbars.begin(); it != m_Taskbars.end(); ++it)
@@ -966,7 +1052,7 @@ void TaskbarAttributeWorker::InsertWindow(Window window, bool refresh)
 
 		if (it->first == mon)
 		{
-			if (windowMatches && isMaximised)
+			if (windowMatches && isMaximised && !isMinimised)
 			{
 				if (normal.erase(window) > 0)
 				{

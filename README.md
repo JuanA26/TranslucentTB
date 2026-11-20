@@ -5,19 +5,24 @@
 
 With a transparent taskbar, a maximized app ends above a strip of wallpaper, which rarely matches the app.
 This fork adds **`match_window_color`**: while a window is maximized, the taskbar takes the color of the app's
-bottom edge, with a thin divider line in a slightly lighter or darker shade.
+background near the taskbar, with a thin divider line in a slightly lighter or darker shade.
 
 | Before (clear taskbar, maximized blue app) | After (`match_window_color`) |
 |---|---|
 | ![Before](docs/improved/before_blue.png) | ![After](docs/improved/fork_match_blue.png) |
 
 ### How it behaves
-- Samples the 3 pixel rows next to the taskbar 10 times a second and picks the dominant color.
-- If the app's edge is busy (a photo, mixed UI: under 60% one color), it falls back to the state's normal `accent`/`color`.
+- Samples a band up to 192 logical pixels inside the app, using a fixed 96 by 16 grid up to 10 times a second.
+- Prefers a shared background in both side margins. This keeps a PDF viewer's surround steady as white pages
+  scroll past the taskbar. If the margins differ, combines the area's average and dominant color.
+- Mixed content stays opaque. Capture failures retain the current app's last sample, or use a neutral
+  system-theme surface until the first capture succeeds.
 - Keeps taskbar icons and clock readable: the color is darkened (dark system theme) or lightened (light theme)
   until the text reaches 3:1 contrast. A white app gives a `#949494` taskbar.
 - `show_line: true` draws the divider in a shade of the matched color.
-- Changes fade over 150 ms (ease-out), including fading in when a window is maximized and out when it isn't.
+- Changes fade over 250 ms (ease-out); content changes also pass through a 350 ms time-based filter.
+  Switching apps resets that filter. Restoring the desktop still fades back to its configured appearance.
+- Rechecks window state on foreground changes and once a second to recover missed maximize/restore events.
 
 ### Settings
 Add it to `maximized_window_appearance` in `settings.json` (tray icon → Advanced → Edit settings):
@@ -48,7 +53,9 @@ Notes:
 - `TaskbarAttributeWorker`: sampling timer, matched color state, fade timer.
 - `ExplorerTAP`: new `SetTaskbarBorderColor` call; new GUIDs, ready event and payload (TAP API v5).
 - `TranslucentTB.vcxproj`: `CppWinRTGenerateWindowsMetadata=true` to fix MSB4006 (circular target) on VS 2026.
-- `tools/livecheck/`: Python scripts used to verify builds on a real screen (`verify_live.py`, `fade_check.py`).
+- `tools/livecheck/`: Python scripts used to verify builds on a real screen (`verify_live.py`, `fade_check.py`,
+  `audit_matching.py`). The audit reproduces PDF page-edge changes, thin borders, mixed content and
+  maximize/restore transitions, saves taskbar PNGs and JSON, and fails if the expected surface does not match.
 
 ---
 

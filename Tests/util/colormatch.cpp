@@ -70,6 +70,89 @@ TEST(Util_ColorMatch_PickDominant, EmptyStripHasNoResult)
 	ASSERT_FALSE(PickDominant({}));
 }
 
+TEST(Util_ColorMatch_PickBackground, PdfSurroundStaysStableAsPageCrossesBottom)
+{
+	for (const int pageRows : { 0, 1, 8, 16 })
+	{
+		auto pixels = Repeat({ 38, 38, 38 }, 96 * 16);
+		for (int y = 0; y < pageRows; ++y)
+		{
+			for (int x = 16; x < 80; ++x) pixels[y * 96 + x] = { 255, 255, 255 };
+		}
+		const auto result = PickBackground(pixels, 96);
+		ASSERT_TRUE(result);
+		EXPECT_TRUE(SameRgb(*result, { 38, 38, 38 }));
+	}
+}
+
+TEST(Util_ColorMatch_PickBackground, ThinEdgeAndTextDoNotTakeOverSurround)
+{
+	auto pixels = Repeat({ 38, 38, 38 }, 96 * 16);
+	for (int x = 0; x < 96; ++x) pixels[x] = { 255, 0, 255 };
+	for (int y = 1; y < 16; ++y) pixels[y * 96 + 4] = { 255, 255, 255 };
+	const auto result = PickBackground(pixels, 96);
+	ASSERT_TRUE(result);
+	EXPECT_TRUE(SameRgb(*result, { 38, 38, 38 }));
+}
+
+TEST(Util_ColorMatch_PickBackground, DifferentSidePanelsUseAreaInsteadOfOnePanel)
+{
+	auto pixels = Repeat({ 32, 64, 96 }, 96 * 16);
+	for (std::size_t i = 0; i < pixels.size(); ++i)
+	{
+		if (i % 96 >= 48) pixels[i] = { 192, 128, 64 };
+	}
+	const auto result = PickBackground(pixels, 96);
+	ASSERT_TRUE(result);
+	EXPECT_TRUE(SameRgb(*result, { 112, 96, 80 }));
+	EXPECT_EQ(result->A, 255);
+}
+
+TEST(Util_ColorMatch_PickBackground, BusyContentStillHasAnOpaqueColor)
+{
+	std::vector<Color> pixels;
+	for (int i = 0; i < 96 * 16; ++i)
+	{
+		pixels.push_back({ static_cast<uint8_t>((i * 37) % 256), static_cast<uint8_t>((i * 91) % 256), static_cast<uint8_t>((i * 53) % 256) });
+	}
+	const auto result = PickBackground(pixels, 96);
+	ASSERT_TRUE(result);
+	EXPECT_EQ(result->A, 255);
+	EXPECT_GT(result->R, 80);
+	EXPECT_LT(result->R, 180);
+}
+
+TEST(Util_ColorMatch_PickBackground, PlainAppsKeepTheirColor)
+{
+	for (const Color color : { Color { 255, 255, 255 }, Color { 43, 87, 151 }, Color { 0, 0, 0 } })
+	{
+		const auto result = PickBackground(Repeat(color, 96 * 16), 96);
+		ASSERT_TRUE(result);
+		EXPECT_TRUE(SameRgb(*result, color));
+	}
+}
+
+TEST(Util_ColorMatch_PickBackground, InvalidGridHasNoResult)
+{
+	EXPECT_FALSE(PickBackground({}, 96));
+	EXPECT_FALSE(PickBackground(Repeat({ 30, 30, 30 }, 96), 0));
+	EXPECT_FALSE(PickBackground(Repeat({ 30, 30, 30 }, 95), 96));
+}
+
+TEST(Util_ColorMatch_SmoothBackground, SuppressesBriefChangesAndConverges)
+{
+	const Color dark { 38, 38, 38 }, white { 255, 255, 255 };
+	EXPECT_TRUE(SameRgb(SmoothBackground(dark, white, 0.0), dark));
+	EXPECT_TRUE(SameRgb(SmoothBackground(dark, white, -1.0), dark));
+	const auto first = SmoothBackground(dark, white, 0.1);
+	EXPECT_GT(first.R, dark.R);
+	EXPECT_LT(first.R, 100);
+	auto settled = dark;
+	for (int i = 0; i < 20; ++i) settled = SmoothBackground(settled, white, 0.1);
+	EXPECT_GE(settled.R, 253);
+	EXPECT_EQ(settled.A, 255);
+}
+
 TEST(Util_ColorMatch_EnsureReadable, DarkColorIsLeftAloneForWhiteText)
 {
 	ASSERT_TRUE(SameRgb(EnsureReadable({ 32, 32, 32 }, true, 3.0), { 32, 32, 32 }));
