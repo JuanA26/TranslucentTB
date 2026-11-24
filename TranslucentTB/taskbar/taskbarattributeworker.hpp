@@ -213,6 +213,10 @@ private:
 	void BeginFade(MonitorInfo &info, const std::optional<Util::Color> &target);
 	void OnFadeTimer();
 
+	// Retry taskbar detection when ResetState could not identify the taskbar type.
+	static constexpr UINT_PTR RESET_RETRY_TIMER_ID = 0x54424F;
+	static constexpr UINT RESET_RETRY_MS = 1000;
+
 	// Attribute
 	void ShowAeroPeekButton(const TaskbarInfo &taskbar, bool show);
 	void ShowTaskbarLine(const TaskbarInfo &taskbar, bool show);

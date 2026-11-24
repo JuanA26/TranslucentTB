@@ -333,6 +333,12 @@ LRESULT TaskbarAttributeWorker::MessageHandler(UINT uMsg, WPARAM wParam, LPARAM 
 		OnFadeTimer();
 		return 0;
 	}
+	else if (uMsg == WM_TIMER && wParam == RESET_RETRY_TIMER_ID)
+	{
+		KillTimer(m_WindowHandle, RESET_RETRY_TIMER_ID);
+		ResetState();
+		return 0;
+	}
 	else if (uMsg == WM_SETTINGCHANGE)
 	{
 		if (InSendMessage())
@@ -1545,6 +1551,17 @@ TaskbarType TaskbarAttributeWorker::GetTaskbarType(Window taskbar)
 	{
 		uint32_t islandsCount = 0;
 		EnumChildWindows(taskbar, WindowEnumProc, reinterpret_cast<LPARAM>(&islandsCount));
+		if (islandsCount == 0)
+		{
+			// EnumChildWindows (and GW_CHILD) can skip the taskbar's XAML island for a while,
+			// seen around full-screen game focus changes, while FindWindowEx still finds it.
+			// Without this, the type is Unknown and the taskbar is left uncontrolled.
+			for ([[maybe_unused]] const Window island : taskbar.find_childs(L"Windows.UI.Composition.DesktopWindowContentBridge", L"DesktopWindowXamlSource"))
+			{
+				++islandsCount;
+			}
+		}
+
 		if (islandsCount == 2)
 		{
 			return TaskbarType::Mixed;
@@ -1759,6 +1776,7 @@ void TaskbarAttributeWorker::ResetState(bool manual)
 	{
 		MessagePrint(spdlog::level::debug, L"Resetting worker state");
 
+		KillTimer(m_WindowHandle, RESET_RETRY_TIMER_ID);
 		m_ResettingState = true;
 		m_ResetStateReentered = false;
 		auto guard = wil::scope_exit([this]
@@ -1838,7 +1856,14 @@ void TaskbarAttributeWorker::ResetState(bool manual)
 				}
 				else
 				{
-					// unknown taskbar type - we might've detected explorer too early. do nothing for now. we should get a refresh later and be able to detect it.
+					// unknown taskbar type - we might've detected explorer too early, or the taskbar's
+					// children are briefly not enumerable. No event is guaranteed to follow, and the
+					// taskbar would keep its last appearance indefinitely, so retry shortly.
+					MessagePrint(spdlog::level::info, L"Taskbar type not detected, retrying shortly");
+					if (!SetTimer(m_WindowHandle, RESET_RETRY_TIMER_ID, RESET_RETRY_MS, nullptr))
+					{
+						LastErrorHandle(spdlog::level::warn, L"Failed to start taskbar detection retry timer");
+					}
 					return;
 				}
 
