@@ -54,6 +54,11 @@ HRESULT InjectExplorerTAP(HWND window, REFIID riid, LPVOID* ppv) try
 			return HRESULT_FROM_WIN32(GetLastError());
 		}
 
+		// The hook only loads this DLL into Explorer when its UI thread handles a sent message.
+		// An idle (or just restarted) taskbar may not get one for the whole timeout, so send one,
+		// without waiting for Explorer's UI thread. (From upstream TranslucentTB fe1f565, #1359.)
+		SendNotifyMessage(window, WM_NULL, 0, 0);
+
 		static constexpr DWORD READY_TIMEOUT =
 #ifdef _DEBUG
 			// do not timeout on debug builds, to allow debugging the DLL while it's loading in explorer
