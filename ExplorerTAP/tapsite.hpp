@@ -14,6 +14,8 @@ public:
 	static DWORD WINAPI Install(void* parameter);
 
 private:
+	static DWORD InstallImpl();
+
 	HRESULT STDMETHODCALLTYPE SetSite(IUnknown* pUnkSite) override;
 	HRESULT STDMETHODCALLTYPE GetSite(REFIID riid, void** ppvSite) noexcept override;
 

@@ -1823,6 +1823,11 @@ void TaskbarAttributeWorker::ResetState(bool manual)
 					}
 				}
 
+				if (pid != m_LastExplorerPid)
+				{
+					m_TAPFailedAttempts = 0;
+				}
+
 				m_LastExplorerPid = pid;
 
 				m_TaskbarType = GetTaskbarType(main_taskbar);
@@ -1835,10 +1840,25 @@ void TaskbarAttributeWorker::ResetState(bool manual)
 						Localization::ShowLocalizedMessageBox(IDS_RESTART_REQUIRED, MB_OK | MB_ICONWARNING | MB_SETFOREGROUND, hinstance()).join();
 						ExitProcess(1);
 					}
+					else if (FAILED(hr) && ++m_TAPFailedAttempts < TAP_MAX_ATTEMPTS)
+					{
+						// A freshly restarted Explorer (for example after Windows closed a hung one) can
+						// take longer than the TAP's ready timeout. Leave the taskbar alone and try again
+						// rather than exiting; only give up after several consecutive failures.
+						m_TaskbarService = nullptr;
+						HresultHandle(hr, spdlog::level::warn, std::format(L"Failed to initialize XAML Diagnostics (attempt {} of {}), retrying shortly.", m_TAPFailedAttempts, TAP_MAX_ATTEMPTS));
+						if (!SetTimer(m_WindowHandle, RESET_RETRY_TIMER_ID, TAP_RETRY_MS, nullptr))
+						{
+							LastErrorHandle(spdlog::level::warn, L"Failed to start XAML Diagnostics retry timer");
+						}
+						return;
+					}
 					else
 					{
 						HresultVerify(hr, spdlog::level::critical, L"Failed to initialize XAML Diagnostics.");
 					}
+
+					m_TAPFailedAttempts = 0;
 
 					HresultVerify(m_TaskbarService->RestoreAllTaskbarsToDefaultWhenProcessDies(GetCurrentProcessId()), spdlog::level::warn, L"Couldn't configure TAP to restore taskbar appearance once " APP_NAME L" dies.");
 

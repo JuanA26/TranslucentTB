@@ -16,7 +16,18 @@ wil::unique_event_nothrow TAPSite::GetReadyEvent()
 	return readyEvent;
 }
 
-DWORD TAPSite::Install(void*)
+DWORD TAPSite::Install(void* parameter)
+{
+	// parameter is a module reference taken by DllMain (see there), or null if that failed.
+	if (const auto self = static_cast<HMODULE>(parameter))
+	{
+		FreeLibraryAndExitThread(self, InstallImpl());
+	}
+
+	return InstallImpl();
+}
+
+DWORD TAPSite::InstallImpl()
 {
 	const auto event = GetReadyEvent();
 

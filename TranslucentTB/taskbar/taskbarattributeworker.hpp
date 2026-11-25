@@ -217,6 +217,12 @@ private:
 	static constexpr UINT_PTR RESET_RETRY_TIMER_ID = 0x54424F;
 	static constexpr UINT RESET_RETRY_MS = 1000;
 
+	// Retry injecting the TAP when it fails, e.g. Explorer still unresponsive right after
+	// Windows closed a hung Explorer. Each failed attempt can itself take up to 35 s.
+	static constexpr UINT TAP_RETRY_MS = 5000;
+	static constexpr unsigned int TAP_MAX_ATTEMPTS = 6;
+	unsigned int m_TAPFailedAttempts = 0;
+
 	// Attribute
 	void ShowAeroPeekButton(const TaskbarInfo &taskbar, bool show);
 	void ShowTaskbarLine(const TaskbarInfo &taskbar, bool show);
