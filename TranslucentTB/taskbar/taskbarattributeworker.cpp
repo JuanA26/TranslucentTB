@@ -13,8 +13,10 @@
 #include "undoc/user32.hpp"
 #include "undoc/winuser.hpp"
 #include "win32.hpp"
+#include "winrt.hpp"
 #include "winrt/Windows.Foundation.h"
 #include "winrt/Windows.Foundation.Metadata.h"
+#include "winrt/Windows.System.Power.h"
 
 class TaskbarAttributeWorker::AttributeRefresher {
 private:
@@ -23,7 +25,7 @@ private:
 	bool m_Armed;
 
 public:
-	AttributeRefresher(TaskbarAttributeWorker &worker, bool refresh = true) noexcept :
+	explicit AttributeRefresher(TaskbarAttributeWorker &worker, bool refresh = true) noexcept :
 		m_Worker(worker), m_Armed(refresh) { }
 
 	AttributeRefresher(const AttributeRefresher &) = delete;
@@ -292,12 +294,21 @@ LRESULT TaskbarAttributeWorker::OnSystemSettingsChange(UINT uiAction)
 	return 0;
 }
 
-LRESULT TaskbarAttributeWorker::OnPowerBroadcast(const POWERBROADCAST_SETTING *settings)
+LRESULT TaskbarAttributeWorker::OnPowerBroadcast(const POWERBROADCAST_SETTING* settings)
 {
-	if (settings && settings->PowerSetting == GUID_POWER_SAVING_STATUS && settings->DataLength == sizeof(DWORD))
+	if (settings && settings->DataLength == sizeof(DWORD))
 	{
-		m_PowerSaver = *reinterpret_cast<const DWORD *>(&settings->Data);
-		RefreshAllAttributes();
+		const DWORD value = *reinterpret_cast<const DWORD*>(&settings->Data);
+		if (settings->PowerSetting == GUID_POWER_SAVING_STATUS)
+		{
+			m_PowerSaver = (value != 0);
+			RefreshAllAttributes();
+		}
+		else if (settings->PowerSetting == GUID_ENERGY_SAVER_STATUS)
+		{
+			m_EnergySaver = (value != ENERGY_SAVER_OFF);
+			RefreshAllAttributes();
+		}
 	}
 
 	return TRUE;
@@ -417,7 +428,7 @@ TaskbarAppearance TaskbarAttributeWorker::GetConfig(taskbar_iterator taskbar) co
 {
 	const auto& config = m_ConfigManager.GetConfig();
 
-	if (config.BatterySaverAppearance.Enabled && m_PowerSaver)
+	if (config.BatterySaverAppearance.Enabled && (m_PowerSaver || m_EnergySaver))
 	{
 		return WithPreview(txmp::TaskbarState::BatterySaver, config.BatterySaverAppearance);
 	}
@@ -1586,15 +1597,16 @@ TaskbarAttributeWorker::TaskbarAttributeWorker(ConfigManager &cfgManager, HINSTA
 	SetWindowCompositionAttribute(loader.SetWindowCompositionAttribute()),
 	ShouldSystemUseDarkMode(loader.ShouldSystemUseDarkMode()),
 	m_PowerSaver(false),
+	m_EnergySaver(false),
 	m_TaskViewActive(false),
 	m_PeekActive(false),
 	m_disableAttributeRefreshReply(false),
 	m_ResettingState(false),
 	m_ResetStateReentered(false),
-	m_TaskbarType(TaskbarType::Unknown),
 	m_CurrentStartMonitor(nullptr),
 	m_CurrentSearchMonitor(nullptr),
 	m_CurrentFindInStartMonitor(nullptr),
+	m_TaskbarType(TaskbarType::Unknown),
 	m_ConfigManager(cfgManager),
 	m_ThunkPage(member_thunk::allocate_page()),
 	m_PeekUnpeekHook(CreateHook(EVENT_SYSTEM_PEEKSTART, EVENT_SYSTEM_PEEKEND, CreateThunk(&TaskbarAttributeWorker::OnAeroPeekEnterExit))),
@@ -1634,7 +1646,14 @@ TaskbarAttributeWorker::TaskbarAttributeWorker(ConfigManager &cfgManager, HINSTA
 	m_PowerSaverHook.reset(RegisterPowerSettingNotification(m_WindowHandle, &GUID_POWER_SAVING_STATUS, DEVICE_NOTIFY_WINDOW_HANDLE));
 	if (!m_PowerSaverHook)
 	{
-		LastErrorHandle(spdlog::level::warn, L"Failed to create battery saver notification handle");
+		LastErrorHandle(spdlog::level::warn, L"Failed to create power saver notification handle");
+	}
+
+	m_EnergySaverHook.reset(RegisterPowerSettingNotification(m_WindowHandle, &GUID_ENERGY_SAVER_STATUS, DEVICE_NOTIFY_WINDOW_HANDLE));
+	if (!m_EnergySaverHook)
+	{
+		// only supported in Windows 11
+		LastErrorHandle(spdlog::level::info, L"Failed to create energy saver notification handle");
 	}
 
 	CreateAppVisibility();
@@ -1761,7 +1780,11 @@ void TaskbarAttributeWorker::DumpState()
 	MessagePrint(spdlog::level::off, buf);
 
 	buf.clear();
-	std::format_to(std::back_inserter(buf), L"Battery saver is active: {}", m_PowerSaver);
+	std::format_to(std::back_inserter(buf), L"Power saver is active: {}", m_PowerSaver);
+	MessagePrint(spdlog::level::off, buf);
+
+	buf.clear();
+	std::format_to(std::back_inserter(buf), L"Energy saver is active: {}", m_EnergySaver);
 	MessagePrint(spdlog::level::off, buf);
 
 	MessagePrint(spdlog::level::off, L"Taskbars currently using normal appearance:");
@@ -1787,6 +1810,7 @@ void TaskbarAttributeWorker::ResetState(bool manual)
 
 		// Clear state
 		m_PowerSaver = false;
+		m_EnergySaver = false;
 		m_PeekActive = false;
 		m_TaskViewActive = false;
 		m_CurrentStartMonitor = nullptr;
@@ -1813,7 +1837,7 @@ void TaskbarAttributeWorker::ResetState(bool manual)
 					if (m_LastExplorerPid != 0 && pid != m_LastExplorerPid)
 					{
 						const auto now = std::chrono::steady_clock::now();
-						if (now < m_LastExplorerRestart + std::chrono::seconds(30)) [[unlikely]]
+						if (!m_ConfigManager.GetConfig().DisableExplorerCrashDetection.value_or(false) && now < m_LastExplorerRestart + std::chrono::seconds(30))
 						{
 							Localization::ShowLocalizedMessageBox(IDS_EXPLORER_RESTARTED_TOO_MUCH, MB_OK | MB_ICONWARNING | MB_SETFOREGROUND, hinstance()).join();
 							ExitProcess(1);
@@ -1916,6 +1940,15 @@ void TaskbarAttributeWorker::ResetState(bool manual)
 		{
 			LastErrorHandle(spdlog::level::warn, L"Failed to verify system power status");
 		}
+
+		try
+		{
+			const auto energySaverStatus2 = winrt::Windows::System::Power::PowerManager::EnergySaverStatus2();
+
+			using enum winrt::Windows::System::Power::EnergySaverStatus2;
+			m_EnergySaver = (energySaverStatus2 != Off && energySaverStatus2 != Unknown);
+		}
+		HresultErrorCatch(spdlog::level::info, L"Failed to verify energy saver status");
 
 		// TODO: check if aero peek is active
 

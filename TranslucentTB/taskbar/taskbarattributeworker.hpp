@@ -94,6 +94,7 @@ private:
 
 	// State
 	bool m_PowerSaver;
+	bool m_EnergySaver;
 	bool m_TaskViewActive;
 	bool m_PeekActive;
 	bool m_disableAttributeRefreshReply;
@@ -121,6 +122,7 @@ private:
 	wil::unique_hwineventhook m_ParentChangeHook;
 	wil::unique_hwineventhook m_OrderChangeHook;
 	wil::unique_hpowernotify m_PowerSaverHook;
+	wil::unique_hpowernotify m_EnergySaverHook;
 
 	// IAppVisibility
 	wil::com_ptr<IAppVisibility> m_IAV;

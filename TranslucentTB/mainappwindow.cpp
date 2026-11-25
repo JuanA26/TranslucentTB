@@ -257,7 +257,7 @@ winrt::fire_and_forget MainAppWindow::StartupStateChanged()
 	{
 		switch (*state)
 		{
-			using enum winrt::Windows::ApplicationModel::StartupTaskState;
+			using enum wam::StartupTaskState;
 
 		case Disabled:
 			co_await manager.Enable();
