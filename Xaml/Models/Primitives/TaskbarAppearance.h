@@ -22,6 +22,7 @@ namespace winrt::TranslucentTB::Xaml::Models::Primitives::implementation
 		DECL_PROPERTY_FUNCS(bool, ShowPeek, m_ShowPeek);
 		DECL_PROPERTY_FUNCS(bool, ShowLine, m_ShowLine);
 		DECL_PROPERTY_FUNCS(float, BlurRadius, m_Radius);
+		DECL_PROPERTY_FUNCS(bool, MatchWindowColor, m_MatchWindowColor);
 
 	private:
 		AccentState m_Accent = AccentState::Normal;
@@ -29,6 +30,7 @@ namespace winrt::TranslucentTB::Xaml::Models::Primitives::implementation
 		bool m_ShowPeek = true;
 		bool m_ShowLine = true;
 		float m_Radius = 9.0f;
+		bool m_MatchWindowColor = false;
 	};
 }
 

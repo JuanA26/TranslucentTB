@@ -21,5 +21,9 @@ namespace TranslucentTB.Xaml.Models.Primitives
 
 		[noexcept]
 		Single BlurRadius;
+
+		// TranslucentBarImproved: follow the maximized app's edge color
+		[noexcept]
+		Boolean MatchWindowColor;
 	}
 }

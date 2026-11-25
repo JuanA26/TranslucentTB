@@ -40,7 +40,9 @@ struct OptionalTaskbarAppearance : TaskbarAppearance {
 
 	operator txmp::OptionalTaskbarAppearance() const
 	{
-		return { Enabled, static_cast<txmp::AccentState>(Accent), Color, ShowPeek, ShowLine, BlurRadius };
+		txmp::OptionalTaskbarAppearance appearance { Enabled, static_cast<txmp::AccentState>(Accent), Color, ShowPeek, ShowLine, BlurRadius };
+		appearance.MatchWindowColor(MatchWindowColor);
+		return appearance;
 	}
 #endif
 

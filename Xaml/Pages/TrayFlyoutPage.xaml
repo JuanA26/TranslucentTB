@@ -109,6 +109,7 @@
                 <ToggleMenuFlyoutItem Tag="Enabled" x:Uid="TrayFlyoutPage_Enabled" Style="{StaticResource MergeIconsToggleMenuFlyoutItem}" Click="AppearanceClicked" />
                 <ToggleMenuFlyoutItem Tag="ShowPeek" x:Uid="TrayFlyoutPage_PeekButton" Style="{StaticResource MergeIconsToggleMenuFlyoutItem}" Click="AppearanceClicked" />
                 <ToggleMenuFlyoutItem Tag="ShowLine" x:Uid="TrayFlyoutPage_LineButton" Style="{StaticResource MergeIconsToggleMenuFlyoutItem}" Click="AppearanceClicked" />
+                <ToggleMenuFlyoutItem Tag="MatchWindowColor" x:Uid="TrayFlyoutPage_MatchWindowColor" Style="{StaticResource MergeIconsToggleMenuFlyoutItem}" Click="AppearanceClicked" />
                 <MenuFlyoutItem Tag="Color" x:Uid="TrayFlyoutPage_AccentColor" Style="{StaticResource MergeIconsMenuFlyoutItem}" Click="ColorClicked">
                     <MenuFlyoutItem.Icon>
                         <FontIcon Glyph="&#xE790;" />

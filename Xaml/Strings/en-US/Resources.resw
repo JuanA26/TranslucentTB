@@ -228,6 +228,9 @@
   <data name="TrayFlyoutPage_LineButton.Text" xml:space="preserve">
     <value>Show taskbar border</value>
   </data>
+  <data name="TrayFlyoutPage_MatchWindowColor.Text" xml:space="preserve">
+    <value>Match app color</value>
+  </data>
   <data name="TrayFlyoutPage_MaximizedWindow.Text" xml:space="preserve">
     <value>Maximized window</value>
     <comment>Also used to generate the title of color picker windows</comment>

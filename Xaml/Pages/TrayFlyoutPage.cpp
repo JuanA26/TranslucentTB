@@ -66,6 +66,11 @@ namespace winrt::TranslucentTB::Xaml::Pages::implementation
 						toggleItem.IsChecked(appearance.ShowLine());
 						toggleItem.IsEnabled(enabled);
 					}
+					else if (stringTag == L"MatchWindowColor")
+					{
+						toggleItem.IsChecked(appearance.MatchWindowColor());
+						toggleItem.IsEnabled(enabled);
+					}
 				}
 				else if (tag.try_as<hstring>() == L"Color")
 				{
@@ -316,6 +321,10 @@ namespace winrt::TranslucentTB::Xaml::Pages::implementation
 				else if (tag.try_as<hstring>() == L"ShowLine")
 				{
 					appearance.ShowLine(toggleItem.IsChecked());
+				}
+				else if (tag.try_as<hstring>() == L"MatchWindowColor")
+				{
+					appearance.MatchWindowColor(toggleItem.IsChecked());
 				}
 			}
 		}

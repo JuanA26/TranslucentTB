@@ -142,12 +142,15 @@ public:
 		Color(winrtObj.Color()),
 		ShowPeek(winrtObj.ShowPeek()),
 		ShowLine(winrtObj.ShowLine()),
-		BlurRadius(winrtObj.BlurRadius())
+		BlurRadius(winrtObj.BlurRadius()),
+		MatchWindowColor(winrtObj.MatchWindowColor())
 	{ }
 
 	operator txmp::TaskbarAppearance() const
 	{
-		return { static_cast<txmp::AccentState>(Accent), Color, ShowPeek, ShowLine, BlurRadius };
+		txmp::TaskbarAppearance appearance { static_cast<txmp::AccentState>(Accent), Color, ShowPeek, ShowLine, BlurRadius };
+		appearance.MatchWindowColor(MatchWindowColor);
+		return appearance;
 	}
 #endif
 };

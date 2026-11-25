@@ -119,8 +119,10 @@ void MainAppWindow::TaskbarSettingsChanged(const txmp::TaskbarState &state, cons
 	// restore color because the context menu doesn't transmit that info
 	appearance.Color(config.Color);
 
-	// same for match_window_color, which the menu doesn't know about
-	const bool matchWindowColor = config.MatchWindowColor;
+	// match_window_color only has a menu toggle for maximised windows; keep it for other states
+	const bool matchWindowColor = state == txmp::TaskbarState::MaximisedWindow
+		? appearance.MatchWindowColor()
+		: config.MatchWindowColor;
 
 	if (const auto optAppearance = appearance.try_as<txmp::OptionalTaskbarAppearance>())
 	{
