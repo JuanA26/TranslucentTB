@@ -659,11 +659,13 @@ void TaskbarAttributeWorker::ApplyAttribute(taskbar_iterator taskbar, TaskbarApp
 	// do not pass any member of taskbar map by reference.
 	// See comment in InsertWindow.
 	const auto taskbarInfo = taskbar->second.Taskbar;
+	const auto shown = taskbar->second.ShownColor;
+	taskbar->second.Applied = MonitorInfo::AppliedState { cfg, shown };
 
 	// Window color matching: paint the taskbar with the app's edge color (alpha < 255 only while
 	// fading in/out), and (if the line is shown) use a subtle shade of it as the divider.
 	std::optional<Util::Color> divider;
-	if (const auto shown = taskbar->second.ShownColor)
+	if (shown)
 	{
 		cfg.Accent = ACCENT_ENABLE_TRANSPARENTGRADIENT;
 		cfg.Color = *shown;
@@ -807,14 +809,56 @@ bool TaskbarAttributeWorker::UpdateMatchedColor(taskbar_iterator taskbar, const 
 	Window source;
 	if (cfg.MatchWindowColor && !info.MaximisedWindows.empty())
 	{
+		// The shell drops the taskbar behind full-screen apps (games, video). An app window
+		// that is above the taskbar in z-order and spans it therefore hides it: sampling
+		// would only read that app's pixels, 10 times a second, for a taskbar nobody sees.
+		const Window taskbarWindow = info.Taskbar.TaskbarWindow;
+		const auto taskbarRect = taskbarWindow.rect();
+		const bool canBeCovered = taskbarRect && !IsRectEmpty(&*taskbarRect);
+		bool aboveTaskbar = true;
+		bool covered = false;
 		for (const Window window : Window::DesktopWindow().get_ordered_childrens())
 		{
-			if (info.MaximisedWindows.contains(window) && window.visible() && window.maximised() &&
-				!window.minimised() && !window.cloaked() && window.monitor() == taskbar->first)
+			if (window == taskbarWindow)
+			{
+				aboveTaskbar = false;
+				continue;
+			}
+
+			const bool maximised = info.MaximisedWindows.contains(window);
+			if (!maximised && !(aboveTaskbar && canBeCovered && info.NormalWindows.contains(window)))
+			{
+				continue;
+			}
+
+			if (!window.visible() || window.minimised() || window.cloaked() || window.monitor() != taskbar->first)
+			{
+				continue;
+			}
+
+			if (aboveTaskbar && canBeCovered)
+			{
+				if (const auto rect = window.rect(); rect &&
+					rect->left <= taskbarRect->left && rect->top <= taskbarRect->top &&
+					rect->right >= taskbarRect->right && rect->bottom >= taskbarRect->bottom)
+				{
+					covered = true;
+					break;
+				}
+			}
+
+			if (maximised && window.maximised())
 			{
 				source = window;
 				break;
 			}
+		}
+
+		if (covered)
+		{
+			// Keep the color and filter as they are. The filter is time-based, so the first
+			// sample after the taskbar reappears replaces the old one almost entirely.
+			return false;
 		}
 	}
 
@@ -860,23 +904,66 @@ bool TaskbarAttributeWorker::UpdateMatchedColor(taskbar_iterator taskbar, const 
 	if (changed)
 	{
 		matched = sampled;
-		BeginFade(taskbar->second, sampled);
+		BeginFade(taskbar->second, sampled, cfg);
 	}
 
 	return changed;
 }
 
-void TaskbarAttributeWorker::BeginFade(MonitorInfo &info, const std::optional<Util::Color> &target)
+std::optional<Util::Color> TaskbarAttributeWorker::RestColor(const TaskbarAppearance &cfg) noexcept
 {
-	// start from what's painted now; when nothing is, fade in from the target color at zero opacity
-	Util::Color from;
-	if (info.ShownColor)
+	switch (cfg.Accent)
 	{
-		from = *info.ShownColor;
+	case ACCENT_ENABLE_TRANSPARENTGRADIENT:
+		return cfg.Color;
+
+	case ACCENT_ENABLE_GRADIENT:
+		// opaque ignores the configured alpha, see SetAttribute
+		return Util::Color { cfg.Color.R, cfg.Color.G, cfg.Color.B, 255 };
+
+	default:
+		return std::nullopt;
 	}
-	else if (target)
+}
+
+void TaskbarAttributeWorker::BeginFade(MonitorInfo &info, const std::optional<Util::Color> &target, const TaskbarAppearance &cfg)
+{
+	// A fade runs between two solid colors: what is painted now and the matched color, or the
+	// matched color and the configured appearance it gives way to. When that appearance is not
+	// a solid color (normal, blur, acrylic) there is nothing to blend with, so switch in one
+	// step rather than fade through a transparent taskbar first.
+	Util::Color from, to;
+	if (target)
 	{
-		from = { target->R, target->G, target->B, 0 };
+		if (info.ShownColor)
+		{
+			from = *info.ShownColor;
+		}
+		else if (const auto rest = RestColor(info.Applied ? info.Applied->Config : cfg))
+		{
+			from = *rest;
+		}
+		else
+		{
+			info.Fading = false;
+			info.ShownColor = target;
+			return;
+		}
+
+		to = *target;
+	}
+	else if (info.ShownColor)
+	{
+		const auto rest = RestColor(cfg);
+		if (!rest)
+		{
+			info.Fading = false;
+			info.ShownColor.reset();
+			return;
+		}
+
+		from = *info.ShownColor;
+		to = *rest;
 	}
 	else
 	{
@@ -884,7 +971,8 @@ void TaskbarAttributeWorker::BeginFade(MonitorInfo &info, const std::optional<Ut
 	}
 
 	info.FadeFrom = from;
-	info.FadeTo = target ? *target : Util::Color { from.R, from.G, from.B, 0 }; // fade out = to transparent
+	info.FadeTo = to;
+	info.FadeEndsMatch = !target.has_value();
 	info.FadeStart = std::chrono::steady_clock::now();
 	info.Fading = true;
 	info.ShownColor = from;
@@ -899,7 +987,7 @@ void TaskbarAttributeWorker::BeginFade(MonitorInfo &info, const std::optional<Ut
 		{
 			LastErrorHandle(spdlog::level::warn, L"Failed to start fade timer, switching color instantly");
 			info.Fading = false;
-			info.ShownColor = info.FadeTo.A == 0 ? std::nullopt : std::optional(info.FadeTo);
+			info.ShownColor = target;
 		}
 	}
 }
@@ -921,11 +1009,11 @@ void TaskbarAttributeWorker::OnFadeTimer()
 		if (t >= 1.0)
 		{
 			info.Fading = false;
-			info.ShownColor = info.FadeTo.A == 0 ? std::nullopt : std::optional(info.FadeTo);
+			info.ShownColor = info.FadeEndsMatch ? std::nullopt : std::optional(info.FadeTo);
 		}
 		else
 		{
-			info.ShownColor = Util::ColorMatch::Blend(info.FadeFrom, info.FadeTo, Util::ColorMatch::EaseOut(t));
+			info.ShownColor = Util::ColorMatch::Crossfade(info.FadeFrom, info.FadeTo, Util::ColorMatch::EaseOut(t));
 			stillFading = true;
 		}
 
@@ -961,6 +1049,7 @@ void TaskbarAttributeWorker::OnMatchTimer()
 	// missed altogether. Reconcile once a second, including destroyed handles.
 	const auto now = std::chrono::steady_clock::now();
 	const auto &config = m_ConfigManager.GetConfig();
+	bool reconciled = false;
 	if ((config.MaximisedWindowAppearance.MatchWindowColor || config.MaximisedWindowAppearance.HasRules() ||
 		config.VisibleWindowAppearance.MatchWindowColor || config.VisibleWindowAppearance.HasRules() ||
 		config.DesktopAppearance.MatchWindowColor) && now - m_LastWindowReconcile >= std::chrono::seconds(1))
@@ -981,16 +1070,27 @@ void TaskbarAttributeWorker::OnMatchTimer()
 		{
 			InsertWindow(window, false);
 		}
-		RefreshAllAttributes();
-		return;
+		reconciled = true;
 	}
 
 	// Sample first, refresh after: refreshing may pump messages that change m_Taskbars.
+	// After a reconcile, a taskbar is also refreshed when the appearance it should have
+	// differs from the one last painted. Repainting an unchanged one every second would
+	// only make Explorer rebuild the same brushes, so that is left to a slower safety net,
+	// which covers a paint that failed or one Explorer replaced on its own.
+	bool repaintAll = false;
+	if (reconciled && now - m_LastFullRepaint >= FULL_REPAINT_INTERVAL)
+	{
+		m_LastFullRepaint = now;
+		repaintAll = true;
+	}
+
 	std::vector<HMONITOR> changed;
 	for (auto it = m_Taskbars.begin(); it != m_Taskbars.end(); ++it)
 	{
 		const auto cfg = GetConfig(it);
-		if ((cfg.MatchWindowColor || it->second.MatchedColor) && UpdateMatchedColor(it, cfg))
+		const bool colorChanged = (cfg.MatchWindowColor || it->second.MatchedColor) && UpdateMatchedColor(it, cfg);
+		if (colorChanged || repaintAll || (reconciled && !IsApplied(it->second, cfg)))
 		{
 			changed.push_back(it->first);
 		}
@@ -1002,6 +1102,55 @@ void TaskbarAttributeWorker::OnMatchTimer()
 		{
 			ApplyAttribute(it, GetConfig(it));
 		}
+	}
+}
+
+bool TaskbarAttributeWorker::IsApplied(const MonitorInfo &info, const TaskbarAppearance &cfg) noexcept
+{
+	if (!info.Applied || !(info.Applied->Shown == info.ShownColor))
+	{
+		return false;
+	}
+
+	const auto &last = info.Applied->Config;
+	return last.Accent == cfg.Accent && last.Color == cfg.Color && last.ShowPeek == cfg.ShowPeek &&
+		last.ShowLine == cfg.ShowLine && last.BlurRadius == cfg.BlurRadius && last.MatchWindowColor == cfg.MatchWindowColor;
+}
+
+bool TaskbarAttributeWorker::ConfigUsesMatchTimer() const
+{
+	// Rules are included because the timer also runs the once-a-second window reconcile for them.
+	const auto &config = m_ConfigManager.GetConfig();
+	return config.DesktopAppearance.MatchWindowColor ||
+		config.VisibleWindowAppearance.MatchWindowColor || config.VisibleWindowAppearance.HasRules() ||
+		config.MaximisedWindowAppearance.MatchWindowColor || config.MaximisedWindowAppearance.HasRules() ||
+		config.StartOpenedAppearance.MatchWindowColor || config.SearchOpenedAppearance.MatchWindowColor ||
+		config.TaskViewOpenedAppearance.MatchWindowColor || config.BatterySaverAppearance.MatchWindowColor;
+}
+
+void TaskbarAttributeWorker::UpdateMatchTimer()
+{
+	const bool wanted = ConfigUsesMatchTimer();
+	if (wanted == m_MatchTimerRunning)
+	{
+		return;
+	}
+
+	if (wanted)
+	{
+		if (SetTimer(m_WindowHandle, MATCH_TIMER_ID, MATCH_INTERVAL_MS, nullptr))
+		{
+			m_MatchTimerRunning = true;
+		}
+		else
+		{
+			LastErrorHandle(spdlog::level::warn, L"Failed to start window color matching timer");
+		}
+	}
+	else
+	{
+		KillTimer(m_WindowHandle, MATCH_TIMER_ID);
+		m_MatchTimerRunning = false;
 	}
 }
 
@@ -1671,10 +1820,7 @@ TaskbarAttributeWorker::TaskbarAttributeWorker(ConfigManager &cfgManager, HINSTA
 	ResetState(true);
 
 	// TranslucentBarImproved: periodically re-sample maximized windows for match_window_color.
-	if (!SetTimer(m_WindowHandle, MATCH_TIMER_ID, MATCH_INTERVAL_MS, nullptr))
-	{
-		LastErrorHandle(spdlog::level::warn, L"Failed to start window color matching timer");
-	}
+	UpdateMatchTimer();
 }
 
 void TaskbarAttributeWorker::DumpState()

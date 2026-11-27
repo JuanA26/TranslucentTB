@@ -64,11 +64,21 @@ private:
 		std::chrono::steady_clock::time_point LastSample;
 
 		// What is currently painted for matching (includes alpha while fading in/out),
-		// and the fade in progress towards MatchedColor (or towards transparent).
+		// and the fade in progress towards MatchedColor, or back to the configured
+		// appearance (FadeEndsMatch: matching stops painting once that fade completes).
 		std::optional<Util::Color> ShownColor;
 		Util::Color FadeFrom, FadeTo;
 		std::chrono::steady_clock::time_point FadeStart;
 		bool Fading = false;
+		bool FadeEndsMatch = false;
+
+		// What ApplyAttribute last painted: lets timer-driven passes skip calls into Explorer
+		// that would change nothing, and lets a fade start from what is really on screen.
+		struct AppliedState {
+			TaskbarAppearance Config;
+			std::optional<Util::Color> Shown;
+		};
+		std::optional<AppliedState> Applied;
 	};
 
 	struct MonitorEnumInfo {
@@ -207,12 +217,26 @@ private:
 	bool m_MatchTimerActive = false;
 	std::chrono::steady_clock::time_point m_LastWindowReconcile;
 
+	// The sampling timer only runs while the configuration can use it.
+	bool m_MatchTimerRunning = false;
+	bool ConfigUsesMatchTimer() const;
+	void UpdateMatchTimer();
+
+	// True when painting cfg now would repeat what is already on the taskbar.
+	// The reconcile skips those repaints, except for one full repaint at this interval.
+	static bool IsApplied(const MonitorInfo &info, const TaskbarAppearance &cfg) noexcept;
+	static constexpr std::chrono::seconds FULL_REPAINT_INTERVAL { 10 };
+	std::chrono::steady_clock::time_point m_LastFullRepaint;
+
 	// Fading between matched colors (TranslucentBarImproved)
 	static constexpr UINT_PTR FADE_TIMER_ID = 0x54424E;
 	static constexpr UINT FADE_FRAME_MS = 15;
 	static constexpr std::chrono::duration<double> FADE_DURATION { 0.25 };
 	bool m_FadeTimerRunning = false;
-	void BeginFade(MonitorInfo &info, const std::optional<Util::Color> &target);
+	// The solid color an appearance paints (clear, opaque), or nothing when it is not one
+	// (normal, blur, acrylic) and so cannot be one end of a color fade.
+	static std::optional<Util::Color> RestColor(const TaskbarAppearance &cfg) noexcept;
+	void BeginFade(MonitorInfo &info, const std::optional<Util::Color> &target, const TaskbarAppearance &cfg);
 	void OnFadeTimer();
 
 	// Retry taskbar detection when ResetState could not identify the taskbar type.
@@ -318,6 +342,7 @@ public:
 	inline void ConfigurationChanged()
 	{
 		RefreshAllAttributes();
+		UpdateMatchTimer();
 	}
 
 	void ApplyColorPreview(txmp::TaskbarState state, Util::Color color)

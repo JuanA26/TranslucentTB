@@ -21,8 +21,12 @@ background near the taskbar, with a thin divider line in a slightly lighter or d
   until the text reaches 3:1 contrast. A white app gives a `#949494` taskbar.
 - `show_line: true` draws the divider in a shade of the matched color.
 - Changes fade over 250 ms (ease-out); content changes also pass through a 350 ms time-based filter.
-  Switching apps resets that filter. Restoring the desktop still fades back to its configured appearance.
+  Switching apps resets that filter. Matching fades from and back to the configured appearance when that
+  is a solid color (`clear`, `opaque`); `normal`, `blur` and `acrylic` are switched to in one step.
 - Rechecks window state on foreground changes and once a second to recover missed maximize/restore events.
+  That check only repaints a taskbar whose appearance changed, plus one full repaint every 10 s as a safety net.
+- Sampling pauses while a full-screen app (game, video) covers the taskbar, and the sampling timer does not
+  run when no appearance uses `match_window_color` or rules.
 
 ### Settings
 Add it to `maximized_window_appearance` in `settings.json` (tray icon → Advanced → Edit settings):

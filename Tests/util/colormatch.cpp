@@ -211,6 +211,48 @@ TEST(Util_ColorMatch_Blend, BlendsAllChannelsIncludingAlpha)
 	ASSERT_EQ(Blend(from, to, 1.0).A, 255);
 }
 
+TEST(Util_ColorMatch_Crossfade, TransparentEndKeepsTheOtherEndsColor)
+{
+	const Color clear { 0, 0, 0, 0 };
+	const Color app { 40, 80, 160 };
+
+	// fading in from a clear taskbar must not darken through black
+	const auto fadeIn = Crossfade(clear, app, 0.5);
+	ASSERT_TRUE(SameRgb(fadeIn, app));
+	ASSERT_EQ(fadeIn.A, 128);
+
+	const auto fadeOut = Crossfade(app, clear, 0.5);
+	ASSERT_TRUE(SameRgb(fadeOut, app));
+	ASSERT_EQ(fadeOut.A, 128);
+
+	ASSERT_EQ(Crossfade(clear, app, 0.0).A, 0);
+	ASSERT_EQ(Crossfade(app, clear, 1.0).A, 0);
+}
+
+TEST(Util_ColorMatch_Crossfade, OpaqueColorsBlendLinearlyAndReachBothEnds)
+{
+	const Color from { 0, 100, 200 };
+	const Color to { 200, 100, 0 };
+	const auto mid = Crossfade(from, to, 0.5);
+	ASSERT_EQ(mid.R, 100);
+	ASSERT_EQ(mid.G, 100);
+	ASSERT_EQ(mid.B, 100);
+	ASSERT_EQ(mid.A, 255);
+	ASSERT_TRUE(Crossfade(from, to, 0.0) == from);
+	ASSERT_TRUE(Crossfade(from, to, 1.0) == to);
+	ASSERT_TRUE(Crossfade(from, to, 2.0) == to); // clamps
+}
+
+TEST(Util_ColorMatch_Crossfade, TintedEndCountsByItsOpacity)
+{
+	// a faint black tint (20% opaque) against opaque white: halfway, white dominates
+	const auto mid = Crossfade({ 0, 0, 0, 51 }, { 255, 255, 255 }, 0.5);
+	ASSERT_EQ(mid.A, 153);
+	ASSERT_NEAR(mid.R, 213, 1);
+	ASSERT_EQ(mid.R, mid.G);
+	ASSERT_EQ(mid.G, mid.B);
+}
+
 TEST(Util_ColorMatch_DividerColor, IsSubtle)
 {
 	const auto d = DividerColor({ 14, 14, 14 });

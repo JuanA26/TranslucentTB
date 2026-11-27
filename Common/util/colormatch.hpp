@@ -197,6 +197,27 @@ namespace Util::ColorMatch {
 		return { lerp(a.R, b.R), lerp(a.G, b.G), lerp(a.B, b.B), lerp(a.A, b.A) };
 	}
 
+	// Crossfade two straight-alpha colors the way two stacked layers would: interpolate
+	// premultiplied. A fully transparent end then contributes no hue of its own, so fading
+	// in from "clear" keeps the target's color instead of darkening through black.
+	inline Color Crossfade(const Color &a, const Color &b, double t) noexcept
+	{
+		t = std::clamp(t, 0.0, 1.0);
+		const double weightA = a.A * (1.0 - t);
+		const double weightB = b.A * t;
+		const double alpha = weightA + weightB;
+		if (alpha <= 0.0)
+		{
+			return { b.R, b.G, b.B, 0 };
+		}
+
+		const auto channel = [weightA, weightB, alpha](std::uint8_t x, std::uint8_t y)
+		{
+			return static_cast<std::uint8_t>(std::clamp(std::lround((x * weightA + y * weightB) / alpha), 0L, 255L));
+		};
+		return { channel(a.R, b.R), channel(a.G, b.G), channel(a.B, b.B), static_cast<std::uint8_t>(std::lround(alpha)) };
+	}
+
 	// A subtle separator shade: lighter on dark colors, darker on light ones.
 	inline Color DividerColor(const Color &c, double strength = 0.15)
 	{
