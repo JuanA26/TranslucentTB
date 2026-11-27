@@ -225,8 +225,11 @@ private:
 	// True when painting cfg now would repeat what is already on the taskbar.
 	// The reconcile skips those repaints, except for one full repaint at this interval.
 	static bool IsApplied(const MonitorInfo &info, const TaskbarAppearance &cfg) noexcept;
+	// For a short while after ResetState it repaints every time, see OnMatchTimer.
 	static constexpr std::chrono::seconds FULL_REPAINT_INTERVAL { 10 };
+	static constexpr std::chrono::seconds RESET_REPAINT_GRACE { 15 };
 	std::chrono::steady_clock::time_point m_LastFullRepaint;
+	std::chrono::steady_clock::time_point m_RepaintEachReconcileUntil;
 
 	// Fading between matched colors (TranslucentBarImproved)
 	static constexpr UINT_PTR FADE_TIMER_ID = 0x54424E;

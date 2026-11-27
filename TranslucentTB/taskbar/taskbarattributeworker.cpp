@@ -321,7 +321,16 @@ LRESULT TaskbarAttributeWorker::OnRequestAttributeRefresh(LPARAM lParam)
 		const Window window = reinterpret_cast<HWND>(lParam);
 		if (const auto iter = m_Taskbars.find(window.monitor()); iter != m_Taskbars.end() && iter->second.Taskbar.TaskbarWindow == window)
 		{
-			if (const auto config = GetConfig(iter); config.Accent != ACCENT_NORMAL)
+			auto config = GetConfig(iter);
+			if (const auto shown = iter->second.ShownColor)
+			{
+				// keep the matched color when Explorer asks what the taskbar should look like,
+				// the same way ApplyAttribute paints it
+				config.Accent = ACCENT_ENABLE_TRANSPARENTGRADIENT;
+				config.Color = *shown;
+			}
+
+			if (config.Accent != ACCENT_NORMAL)
 			{
 				SetAttribute(iter, config);
 				return 1;
@@ -812,9 +821,14 @@ bool TaskbarAttributeWorker::UpdateMatchedColor(taskbar_iterator taskbar, const 
 		// The shell drops the taskbar behind full-screen apps (games, video). An app window
 		// that is above the taskbar in z-order and spans it therefore hides it: sampling
 		// would only read that app's pixels, 10 times a second, for a taskbar nobody sees.
+		// The shell must also have taken the taskbar out of the topmost band, which it only
+		// does for full-screen apps. A see-through overlay that merely sits above a visible
+		// taskbar is then not mistaken for one.
 		const Window taskbarWindow = info.Taskbar.TaskbarWindow;
 		const auto taskbarRect = taskbarWindow.rect();
-		const bool canBeCovered = taskbarRect && !IsRectEmpty(&*taskbarRect);
+		const auto taskbarExStyle = taskbarWindow.get_long_ptr(GWL_EXSTYLE);
+		const bool canBeCovered = taskbarRect && !IsRectEmpty(&*taskbarRect) &&
+			taskbarExStyle && (*taskbarExStyle & WS_EX_TOPMOST) == 0;
 		bool aboveTaskbar = true;
 		bool covered = false;
 		for (const Window window : Window::DesktopWindow().get_ordered_childrens())
@@ -1078,8 +1092,10 @@ void TaskbarAttributeWorker::OnMatchTimer()
 	// differs from the one last painted. Repainting an unchanged one every second would
 	// only make Explorer rebuild the same brushes, so that is left to a slower safety net,
 	// which covers a paint that failed or one Explorer replaced on its own.
+	// Right after a state reset (Explorer restart, taskbar rebuilt) Explorer can accept a
+	// paint without showing it, so repaint on every reconcile for a while, as before.
 	bool repaintAll = false;
-	if (reconciled && now - m_LastFullRepaint >= FULL_REPAINT_INTERVAL)
+	if (reconciled && (now < m_RepaintEachReconcileUntil || now - m_LastFullRepaint >= FULL_REPAINT_INTERVAL))
 	{
 		m_LastFullRepaint = now;
 		repaintAll = true;
@@ -1948,6 +1964,7 @@ void TaskbarAttributeWorker::ResetState(bool manual)
 		KillTimer(m_WindowHandle, RESET_RETRY_TIMER_ID);
 		m_ResettingState = true;
 		m_ResetStateReentered = false;
+		m_RepaintEachReconcileUntil = std::chrono::steady_clock::now() + RESET_REPAINT_GRACE;
 		auto guard = wil::scope_exit([this]
 		{
 			m_ResettingState = false;
