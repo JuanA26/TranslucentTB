@@ -821,9 +821,8 @@ bool TaskbarAttributeWorker::UpdateMatchedColor(taskbar_iterator taskbar, const 
 		// The shell drops the taskbar behind full-screen apps (games, video). An app window
 		// that is above the taskbar in z-order and spans it therefore hides it: sampling
 		// would only read that app's pixels, 10 times a second, for a taskbar nobody sees.
-		// The shell must also have taken the taskbar out of the topmost band, which it only
-		// does for full-screen apps. A see-through overlay that merely sits above a visible
-		// taskbar is then not mistaken for one.
+		// The shell must also have taken the taskbar out of the topmost band, which it does
+		// for windows it considers full-screen. While the taskbar is topmost nothing hides it.
 		const Window taskbarWindow = info.Taskbar.TaskbarWindow;
 		const auto taskbarRect = taskbarWindow.rect();
 		const auto taskbarExStyle = taskbarWindow.get_long_ptr(GWL_EXSTYLE);
@@ -852,7 +851,12 @@ bool TaskbarAttributeWorker::UpdateMatchedColor(taskbar_iterator taskbar, const 
 
 			if (aboveTaskbar && canBeCovered)
 			{
-				if (const auto rect = window.rect(); rect &&
+				// A layered or click-through window is an overlay drawn over the screen. The shell
+				// demotes the taskbar for a full-monitor one too, but the taskbar stays visible
+				// through it, so only an ordinary window counts as covering.
+				const auto exStyle = window.get_long_ptr(GWL_EXSTYLE);
+				const bool solid = exStyle && (*exStyle & (WS_EX_LAYERED | WS_EX_TRANSPARENT)) == 0;
+				if (const auto rect = window.rect(); solid && rect &&
 					rect->left <= taskbarRect->left && rect->top <= taskbarRect->top &&
 					rect->right >= taskbarRect->right && rect->bottom >= taskbarRect->bottom)
 				{
